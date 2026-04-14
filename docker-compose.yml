@@ -1,0 +1,116 @@
+services:
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file: .env
+    environment:
+      - POSTGRES_DB=mnlv_db
+      - POSTGRES_USER=mnlv_user
+      - POSTGRES_PASSWORD=mnlv_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mnlv_user -d mnlv_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: ./mnlv_backend
+    command: >
+      sh -c "python manage.py migrate && 
+             daphne -b 0.0.0.0 -p 8002 core.asgi:application"
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./mnlv_backend:/app
+      - media_volume:/app/media
+      - static_volume:/app/staticfiles
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker_high:
+    build: ./mnlv_backend
+    command: celery -A core worker -Q high_priority --loglevel=info
+    volumes:
+      - ./mnlv_backend:/app
+      - media_volume:/app/media
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker_low:
+    build: ./mnlv_backend
+    command: celery -A core worker -Q low_priority --loglevel=info
+    volumes:
+      - ./mnlv_backend:/app
+      - media_volume:/app/media
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: ./mnlv_backend
+    command: celery -A core beat --loglevel=info
+    volumes:
+      - ./mnlv_backend:/app
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  flower:
+    build: ./mnlv_backend
+    command: celery -A core flower --port=5555
+    ports:
+      - "5555:5555"
+    env_file: .env
+    depends_on:
+      - redis
+
+  frontend:
+    build: ./mnlv_frontend
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./mnlv_frontend:/app
+      - /app/node_modules
+    env_file: .env
+    environment:
+      - VITE_API_URL=/api
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - media_volume:/app/media:ro
+      - static_volume:/app/staticfiles:ro
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  postgres_data:
+  media_volume:
+  static_volume:
