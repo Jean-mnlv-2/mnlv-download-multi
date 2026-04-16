@@ -7,6 +7,7 @@ from .views import (
     SubmitDownloadView, 
     DownloadTaskStatusView, 
     DownloadFileView,
+    HealthCheckView,
     RegisterView,
     UserProfileView,
     PlaylistActionView,
@@ -14,7 +15,14 @@ from .views import (
     SpotifyLoginView,
     SpotifyCallbackView,
     DeezerLoginView,
-    AppleMusicLoginView
+    AppleMusicLoginView,
+    AppleMusicTokenView,
+    AppleMusicPlaylistsView,
+    AppleMusicSearchView,
+    DeezerFlowView,
+    DeezerFavoritesView,
+    DeezerSearchView,
+    DeezerChartsView
 )
 from csv_handler.views import CSVUploadView
 from media_tools.views import MediaConvertWavView, MediaEditTagsView
@@ -27,13 +35,21 @@ urlpatterns = [
     path('auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='user_profile'),
+    path('health/', HealthCheckView.as_view(), name='health_check'),
     
     # Provider Auth
     path('auth/providers/status/', ProviderAuthStatusView.as_view(), name='provider_status'),
     path('auth/providers/spotify/login/', SpotifyLoginView.as_view(), name='spotify_login'),
     path('auth/providers/spotify/callback/', SpotifyCallbackView.as_view(), name='spotify_callback'),
     path('auth/providers/deezer/login/', DeezerLoginView.as_view(), name='deezer_login'),
+    path('auth/providers/deezer/flow/', DeezerFlowView.as_view(), name='deezer_flow'),
+    path('auth/providers/deezer/favorites/', DeezerFavoritesView.as_view(), name='deezer_favorites'),
+    path('auth/providers/deezer/search/', DeezerSearchView.as_view(), name='deezer_search'),
+    path('auth/providers/deezer/charts/', DeezerChartsView.as_view(), name='deezer_charts'),
     path('auth/providers/apple-music/login/', AppleMusicLoginView.as_view(), name='apple_music_login'),
+    path('auth/providers/apple-music/token/', AppleMusicTokenView.as_view(), name='apple_music_token'),
+    path('auth/providers/apple-music/playlists/', AppleMusicPlaylistsView.as_view(), name='apple_music_playlists'),
+    path('auth/providers/apple-music/search/', AppleMusicSearchView.as_view(), name='apple_music_search'),
 
     # Downloads
     path('download/', SubmitDownloadView.as_view(), name='submit_download'),

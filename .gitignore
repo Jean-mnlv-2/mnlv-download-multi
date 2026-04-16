@@ -63,3 +63,4 @@ htmlcov/
 celerybeat-schedule
 *.pot
 *.po
+doc-api-*

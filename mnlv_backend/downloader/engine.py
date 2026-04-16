@@ -7,9 +7,8 @@ from django.conf import settings
 from .models import DownloadTask, TrackMetadata
 from .providers.factory import ProviderFactory
 from .matching.matcher import ISRCMatcher
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TYER, APIC
-from mutagen.mp4 import MP4, MP4Cover
+from media_tools.services import MediaService
+from core.logger_utils import get_mnlv_logger
 
 class DownloadEngine:
     """
@@ -19,10 +18,10 @@ class DownloadEngine:
 
     def __init__(self, task_id: str, logger=None):
         self.task = DownloadTask.objects.get(id=task_id)
-        self.logger = logger
+        self.logger = logger or get_mnlv_logger(f"engine.{task_id}")
         self.temp_dir = Path(settings.MEDIA_ROOT) / "tmp" / str(task_id)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        self.matcher = ISRCMatcher(logger=logger)
+        self.matcher = ISRCMatcher(logger=self.logger)
         self._check_ffmpeg()
 
     def _check_ffmpeg(self):
@@ -51,7 +50,7 @@ class DownloadEngine:
             self.task.save(update_fields=['status'])
 
             provider = ProviderFactory.get_provider(self.task.original_url)
-            metadata = provider.get_track_info(self.task.original_url)
+            metadata = provider.get_track_info_cached(self.task.original_url)
             
             track_meta = None
             if metadata.isrc:
@@ -68,7 +67,12 @@ class DownloadEngine:
             self.task.track = track_meta
             self.task.save(update_fields=['track'])
 
-            ext = "mp3" if self.task.media_type == DownloadTask.MediaType.AUDIO else "mp4"
+            is_video_mode = (
+                self.task.media_type == DownloadTask.MediaType.VIDEO or 
+                (metadata.is_video and self.task.prefer_video)
+            )
+            
+            ext = "mp3" if not is_video_mode else "mp4"
             safe_name = f"{metadata.artist} - {metadata.title}.{ext}".replace("/", "_").replace("\\", "_")
             final_dest = Path(settings.MEDIA_ROOT) / "downloads" / safe_name
             
@@ -83,7 +87,7 @@ class DownloadEngine:
             
             output_template = str(self.temp_dir / f"{self.task.id}.%(ext)s")
             
-            if self.task.media_type == DownloadTask.MediaType.AUDIO:
+            if not is_video_mode:
                 ydl_opts = {
                     'format': 'bestaudio/best',
                     'outtmpl': output_template,
@@ -114,7 +118,11 @@ class DownloadEngine:
                 if found: final_file = found[0]
                 else: raise FileNotFoundError("Le moteur n'a pas pu générer le fichier final.")
 
-            self._apply_metadata(final_file, metadata, self.task.media_type)
+            MediaService.apply_metadata(
+                str(final_file), 
+                metadata.__dict__, 
+                is_video=is_video_mode
+            )
 
             final_dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(final_file), str(final_dest))
@@ -132,33 +140,3 @@ class DownloadEngine:
         finally:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
-
-    def _apply_metadata(self, file_path: Path, metadata, media_type):
-        """Injection des tags et de la pochette"""
-        try:
-            if media_type == DownloadTask.MediaType.AUDIO:
-                audio = MP3(file_path, ID3=ID3)
-                try: audio.add_tags()
-                except: pass
-                audio.tags.add(TIT2(encoding=3, text=metadata.title))
-                audio.tags.add(TPE1(encoding=3, text=metadata.artist))
-                if metadata.album: audio.tags.add(TALB(encoding=3, text=metadata.album))
-                if metadata.release_year: audio.tags.add(TYER(encoding=3, text=str(metadata.release_year)))
-                if metadata.cover_url:
-                    r = requests.get(metadata.cover_url, timeout=10)
-                    if r.status_code == 200:
-                        audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=r.content))
-                audio.save()
-            else:
-                video = MP4(file_path)
-                video["\xa9nam"] = metadata.title
-                video["\xa9ART"] = metadata.artist
-                if metadata.album: video["\xa9alb"] = metadata.album
-                if metadata.release_year: video["\xa9day"] = str(metadata.release_year)
-                if metadata.cover_url:
-                    r = requests.get(metadata.cover_url, timeout=10)
-                    if r.status_code == 200:
-                        video["covr"] = [MP4Cover(r.content, imageformat=MP4Cover.FORMAT_JPEG)]
-                video.save()
-        except Exception as e:
-            if self.logger: self.logger.warning(f"Tagging non bloquant échoué : {e}")

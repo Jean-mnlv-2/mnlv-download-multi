@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useTaskStore, Notification } from './store/useTaskStore';
 import { useAuthStore } from './store/useAuthStore';
 import DownloadCard from './components/downloader/DownloadCard';
@@ -19,9 +20,15 @@ import {
   Settings, 
   LogOut, 
   Moon, 
-  Sun,
-  Globe,
-  Music2
+  Sun, 
+  Globe, 
+  Music2, 
+  Disc, 
+  Radio, 
+  Cloud, 
+  Youtube,
+  TrendingUp,
+  Library
 } from 'lucide-react';
 
 const NotificationToast: React.FC<{ notification: Notification; onRemove: (id: string) => void }> = ({ notification, onRemove }) => {
@@ -60,8 +67,28 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'downloader' | 'playlists' | 'media' | 'settings'>('dashboard');
   const [darkMode, setDarkMode] = useState(localStorage.getItem('theme') === 'dark');
 
-  const { tasks, clearCompleted, notifications, removeNotification, connectWebSocket } = useTaskStore();
-  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken } = useAuthStore();
+  const { tasks, clearCompleted, notifications, removeNotification, addNotification, connectWebSocket, addTask, pollTaskStatus } = useTaskStore();
+  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken, providerStatus } = useAuthStore();
+
+  const handleQuickDownload = async (url: string) => {
+    try {
+      const response = await axios.post('/api/download/', { url });
+      const data = response.data;
+      if (data.type === 'playlist') {
+        data.tasks.forEach((t: any) => {
+          addTask({ id: t.task_id, status: 'PENDING', progress: 0, original_url: url, provider: data.provider || 'URL' });
+          pollTaskStatus(t.task_id);
+        });
+        addNotification('success', `${data.tasks.length} titres ajoutés`);
+      } else {
+        addTask({ id: data.task_id, status: 'PENDING', progress: 0, original_url: url, provider: data.provider || 'URL' });
+        pollTaskStatus(data.task_id);
+        addNotification('info', 'Téléchargement lancé');
+      }
+    } catch (error) {
+      addNotification('error', 'Erreur de téléchargement');
+    }
+  };
 
   useEffect(() => {
     initialize();
@@ -227,15 +254,118 @@ const App: React.FC = () => {
             >
               {activeTab === 'dashboard' && (
                 <div className="space-y-10">
+                  {/* Stats / Welcome Header */}
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="grid grid-cols-1 md:grid-cols-3 gap-6"
+                  >
+                    <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2.5rem] text-white shadow-2xl shadow-blue-500/20 col-span-1 md:col-span-2 relative overflow-hidden group">
+                      <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-3xl group-hover:bg-white/20 transition-all duration-700" />
+                      <div className="relative z-10">
+                        <h3 className="text-3xl font-black tracking-tighter mb-2">Hello, {user?.username}! 👋</h3>
+                        <p className="text-blue-100 font-bold text-sm max-w-sm opacity-80 leading-relaxed">
+                          Votre studio de téléchargement personnel est prêt. Collez un lien pour commencer.
+                        </p>
+                        <button 
+                          onClick={() => setActiveTab('downloader')}
+                          className="mt-6 px-8 py-3 bg-white text-blue-600 rounded-2xl font-black text-sm hover:shadow-xl hover:scale-105 transition-all active:scale-95"
+                        >
+                          Lancer un téléchargement
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm flex flex-col justify-center items-center text-center group">
+                      <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center text-blue-600 mb-4 group-hover:scale-110 transition-transform">
+                        <Download size={28} strokeWidth={2.5} />
+                      </div>
+                      <p className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter">{Object.values(tasks).length}</p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Titres traités</p>
+                    </div>
+                  </motion.div>
+
+                  {/* Deezer Features Section */}
+                  {providerStatus.deezer && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="grid grid-cols-1 md:grid-cols-4 gap-6"
+                    >
+                      <div className="md:col-span-4 flex items-center gap-3">
+                        <div className="w-1 h-6 bg-purple-600 rounded-full" />
+                        <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">
+                          Fonctionnalités Deezer
+                        </h3>
+                      </div>
+                      
+                      <button 
+                        onClick={() => axios.get('/api/auth/providers/deezer/flow/').then(res => {
+                          res.data.tasks.forEach((t: any) => {
+                            addTask({ id: t.task_id, status: 'PENDING', progress: 0, original_url: 'Flow Deezer', provider: 'deezer' });
+                            pollTaskStatus(t.task_id);
+                          });
+                          addNotification('success', 'Flow Deezer lancé');
+                        })}
+                        className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-purple-200 transition-all flex flex-col items-center text-center gap-3 group"
+                      >
+                        <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/20 rounded-2xl flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform">
+                          <Radio size={24} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-gray-900 dark:text-white uppercase">Mon Flow</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Radio Personnelle</p>
+                        </div>
+                      </button>
+
+                      <button 
+                        onClick={() => setActiveTab('playlists')}
+                        className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-pink-200 transition-all flex flex-col items-center text-center gap-3 group"
+                      >
+                        <div className="w-12 h-12 bg-pink-50 dark:bg-pink-900/20 rounded-2xl flex items-center justify-center text-pink-600 group-hover:scale-110 transition-transform">
+                          <Library size={24} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-gray-900 dark:text-white uppercase">Mes Favoris</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Coups de Cœur</p>
+                        </div>
+                      </button>
+
+                      <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm">
+                         <div className="flex items-center gap-3 mb-4">
+                            <TrendingUp size={18} className="text-blue-500" />
+                            <p className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-widest">Tendances</p>
+                         </div>
+                         <div className="flex gap-2">
+                            <button 
+                              onClick={() => handleQuickDownload('https://www.deezer.com/playlist/3155776842')}
+                              className="flex-1 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-tighter hover:bg-blue-600 hover:text-white transition-all"
+                            >
+                              Top 50 Monde
+                            </button>
+                            <button 
+                              onClick={() => handleQuickDownload('https://www.deezer.com/playlist/1109890291')}
+                              className="flex-1 py-2 bg-gray-50 dark:bg-slate-800 text-gray-400 rounded-xl text-[10px] font-black uppercase tracking-tighter hover:bg-gray-200 dark:hover:bg-slate-700 transition-all"
+                            >
+                              Top France
+                            </button>
+                         </div>
+                      </div>
+                    </motion.div>
+                  )}
+
                   <section>
                     <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-sm font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-                        {t('recent_history')}
-                      </h3>
+                      <div className="flex items-center gap-3">
+                        <div className="w-1 h-6 bg-blue-600 rounded-full" />
+                        <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">
+                          {t('recent_history')}
+                        </h3>
+                      </div>
                       {Object.values(tasks).length > 0 && (
                         <button 
                           onClick={clearCompleted}
-                          className="text-[10px] font-black text-gray-400 hover:text-red-500 uppercase tracking-tighter transition-colors"
+                          className="px-4 py-2 bg-gray-50 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20 text-[10px] font-black text-gray-400 hover:text-red-500 uppercase tracking-widest rounded-xl transition-all"
                         >
                           {t('clear_list')}
                         </button>
@@ -244,19 +374,24 @@ const App: React.FC = () => {
                     
                     {Object.values(tasks).length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {Object.values(tasks).map(task => (
-                          <DownloadCard key={task.id} task={task} onPreviewVideo={setPreviewVideo} />
-                        ))}
+                        <AnimatePresence mode="popLayout">
+                          {Object.values(tasks).map(task => (
+                            <DownloadCard key={task.id} task={task} onPreviewVideo={setPreviewVideo} />
+                          ))}
+                        </AnimatePresence>
                       </div>
                     ) : (
-                      <div className="text-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm">
+                      <div className="text-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm border-dashed">
                         <div className="bg-blue-50 dark:bg-blue-900/20 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 transform rotate-3">
                           <Music2 className="text-blue-500 dark:text-blue-400" size={40} />
                         </div>
                         <h4 className="text-xl font-black text-gray-900 dark:text-white mb-2">{t('ready_for_music')}</h4>
-                        <p className="text-gray-400 dark:text-gray-500 max-w-xs mx-auto text-sm font-medium leading-relaxed">
+                        <p className="text-gray-400 dark:text-gray-500 max-w-xs mx-auto text-sm font-medium leading-relaxed mb-8">
                           {t('paste_link')}
                         </p>
+                        <div className="flex justify-center gap-3 opacity-30 grayscale">
+                          <Disc size={20} /> <Radio size={20} /> <Cloud size={20} /> <Youtube size={20} />
+                        </div>
                       </div>
                     )}
                   </section>

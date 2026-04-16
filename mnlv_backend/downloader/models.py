@@ -36,9 +36,11 @@ class DownloadTask(models.Model):
     original_url = models.TextField()
     provider = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    progress = models.IntegerField(default=0) # 0-100
+    progress = models.IntegerField(default=0)
     media_type = models.CharField(max_length=10, choices=MediaType.choices, default=MediaType.AUDIO)
-    quality = models.CharField(max_length=20, null=True, blank=True) # ex: "320kbps", "1080p"
+    prefer_video = models.BooleanField(default=False)
+    quality = models.CharField(max_length=20, null=True, blank=True)
+    explicit_filter = models.BooleanField(default=False) # Si True, ignore les titres explicites
     result_file = models.FileField(upload_to='downloads/', null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
     

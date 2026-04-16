@@ -9,9 +9,13 @@ import {
   Music, 
   Video, 
   ExternalLink,
-  MoreVertical
+  MoreVertical,
+  Disc,
+  Radio,
+  Cloud,
+  Youtube
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 
 interface DownloadCardProps {
@@ -26,6 +30,18 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
   const isProcessing = task.status === 'PROCESSING' || task.status === 'PENDING';
   const isVideo = task.result_file?.endsWith('.mp4') || task.result_file_url?.endsWith('.mp4');
 
+  const providerIcons: { [key: string]: any } = {
+    'spotify': Disc,
+    'deezer': Radio,
+    'apple_music': Music,
+    'youtube_music': Youtube,
+    'soundcloud': Cloud,
+    'tidal': Disc,
+    'amazon_music': Disc
+  };
+
+  const ProviderIcon = (task.provider && providerIcons[task.provider]) || Music;
+
   const downloadHref = (() => {
     const raw = task.result_file_url || task.result_file;
     if (!raw) return null;
@@ -37,64 +53,115 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 5 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="group bg-white dark:bg-slate-900/50 border border-gray-100 dark:border-slate-800 rounded-3xl p-5 flex items-center gap-6 transition-all hover:shadow-xl hover:shadow-gray-200/50 dark:hover:shadow-none hover:border-blue-200 dark:hover:border-blue-900/50"
+      layout
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      whileHover={{ y: -4 }}
+      className="group bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-[2rem] p-4 flex items-center gap-5 transition-all hover:shadow-2xl hover:shadow-blue-500/10 dark:hover:shadow-none hover:border-blue-100 dark:hover:border-blue-900/30"
     >
-      {/* Thumbnail */}
-      <div className="relative w-16 h-16 flex-shrink-0">
-        <div className="w-full h-full bg-gray-100 dark:bg-slate-800 rounded-2xl overflow-hidden shadow-inner border border-gray-50 dark:border-slate-700">
+      {/* Thumbnail with Overlay */}
+      <div className="relative w-20 h-20 flex-shrink-0 group/thumb">
+        <div className="w-full h-full bg-gray-100 dark:bg-slate-800 rounded-[1.5rem] overflow-hidden shadow-inner border border-gray-50 dark:border-slate-700">
           {task.track?.cover_url ? (
             <img 
               src={task.track.cover_url} 
               alt={task.track.title} 
-              className="w-full h-full object-cover transition-transform group-hover:scale-110"
+              className="w-full h-full object-cover transition-transform duration-700 group-hover/thumb:scale-110"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=No+Cover';
               }}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
-              {isVideo ? <Video size={28} /> : <Music size={28} />}
+              {isVideo ? <Video size={32} /> : <Music size={32} />}
             </div>
           )}
+          
+          {/* Status Overlay */}
+          <AnimatePresence>
+            {isProcessing && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center"
+              >
+                <Loader2 size={24} className="animate-spin text-white" />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         
         {isCompleted && (
-          <div className="absolute -top-1 -right-1 bg-green-500 text-white rounded-full p-1 shadow-lg ring-2 ring-white dark:ring-slate-900">
-            <CheckCircle2 size={12} strokeWidth={3} />
-          </div>
+          <motion.div 
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="absolute -top-1.5 -right-1.5 bg-green-500 text-white rounded-full p-1.5 shadow-xl ring-4 ring-white dark:ring-slate-900"
+          >
+            <CheckCircle2 size={14} strokeWidth={3} />
+          </motion.div>
         )}
       </div>
 
       {/* Info & Progress */}
-      <div className="flex-grow min-w-0 space-y-2">
-        <div className="flex items-start justify-between">
+      <div className="flex-grow min-w-0 space-y-3">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-base font-black text-gray-900 dark:text-white truncate tracking-tight">
-              {task.track?.title || t('processing')}
+            <h3 className="text-lg font-black text-gray-900 dark:text-white truncate tracking-tight leading-tight">
+              {task.track?.title || (isProcessing ? 'Initialisation...' : t('processing'))}
             </h3>
-            <p className="text-xs font-bold text-gray-400 dark:text-gray-500 truncate uppercase tracking-widest">
-              {task.track?.artist || (isProcessing ? t('processing') : task.original_url)}
-            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <ProviderIcon size={12} className="text-gray-400" />
+              <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 truncate uppercase tracking-widest">
+                {task.track?.artist || (isProcessing ? 'Recherche des infos...' : 'Source externe')}
+              </p>
+              {task.track?.explicit && (
+                <span className="text-[8px] font-black bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded-sm border border-gray-200 dark:border-slate-700">
+                  E
+                </span>
+              )}
+            </div>
           </div>
-          <span className="text-[10px] font-black bg-gray-50 dark:bg-slate-800 text-gray-400 dark:text-gray-500 px-3 py-1 rounded-lg uppercase tracking-widest border border-gray-100 dark:border-slate-700">
-            {task.provider || 'URL'}
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="text-[9px] font-black bg-gray-50 dark:bg-slate-800 text-gray-400 dark:text-gray-500 px-2.5 py-1 rounded-full uppercase tracking-widest border border-gray-100 dark:border-slate-700">
+              {task.provider || 'URL'}
+            </span>
+            {isVideo && (
+              <span className="text-[9px] font-black bg-blue-50 dark:bg-blue-900/20 text-blue-500 px-2.5 py-1 rounded-full uppercase tracking-widest border border-blue-100/50 dark:border-blue-800/50">
+                4K / MP4
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Progress Section */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-tighter text-gray-400">
-            <span>{isFailed ? t('failed') : isCompleted ? t('completed') : `${task.progress}%`}</span>
-            {isProcessing && <Loader2 size={10} className="animate-spin text-blue-500" />}
+          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-gray-400">
+            <div className="flex items-center gap-1.5">
+              {isFailed ? (
+                <span className="text-red-500 flex items-center gap-1">
+                  <AlertCircle size={10} /> {t('failed')}
+                </span>
+              ) : isCompleted ? (
+                <span className="text-green-500 flex items-center gap-1">
+                  <CheckCircle2 size={10} /> {t('completed')}
+                </span>
+              ) : (
+                <span className="text-blue-500 flex items-center gap-1">
+                  <Loader2 size={10} className="animate-spin" /> {task.progress > 0 ? 'Téléchargement' : 'En attente'}
+                </span>
+              )}
+            </div>
+            <span className={isCompleted ? 'text-green-500' : 'text-gray-500'}>
+              {isFailed ? 'Error' : isCompleted ? '100%' : `${task.progress}%`}
+            </span>
           </div>
-          <div className="h-1.5 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2.5 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-gray-50 dark:border-slate-700/50">
             <motion.div
               initial={{ width: 0 }}
-              animate={{ width: `${task.progress}%` }}
-              className={`h-full rounded-full transition-all duration-500 ${
-                isFailed ? 'bg-red-500' : isCompleted ? 'bg-green-500' : 'bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.4)]'
+              animate={{ width: isFailed ? '100%' : `${task.progress}%` }}
+              className={`h-full rounded-full transition-all duration-700 ${
+                isFailed ? 'bg-red-500/20' : isCompleted ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.4)]' : 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-[0_0_12px_rgba(37,99,235,0.3)]'
               }`}
             />
           </div>
@@ -102,37 +169,50 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2">
-        {isCompleted && downloadHref && (
-          <>
-            {isVideo && onPreviewVideo && (
-              <button
-                onClick={() => onPreviewVideo(downloadHref)}
-                className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center transition-all hover:bg-blue-600 hover:text-white shadow-sm active:scale-95"
-                title={t('preview')}
-              >
-                <Play size={18} fill="currentColor" />
-              </button>
-            )}
-            <a
-              href={downloadHref}
-              download
-              className="w-10 h-10 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl flex items-center justify-center transition-all hover:bg-blue-600 dark:hover:bg-blue-500 dark:hover:text-white shadow-xl shadow-gray-200 dark:shadow-none active:scale-95"
-              title={t('download')}
+      <div className="flex items-center gap-2 pl-2">
+        <AnimatePresence mode="wait">
+          {isCompleted && downloadHref ? (
+            <motion.div 
+              key="actions"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="flex items-center gap-2"
             >
-              <Download size={18} />
-            </a>
-          </>
-        )}
-        
-        {isFailed && (
-          <div className="w-10 h-10 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-xl flex items-center justify-center border border-red-100 dark:border-red-900/50" title={task.error_message}>
-            <AlertCircle size={18} />
-          </div>
-        )}
+              {isVideo && onPreviewVideo && (
+                <button
+                  onClick={() => onPreviewVideo(downloadHref)}
+                  className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center transition-all hover:bg-blue-600 hover:text-white shadow-sm active:scale-90"
+                  title={t('preview')}
+                >
+                  <Play size={20} fill="currentColor" />
+                </button>
+              )}
+              <a
+                href={downloadHref}
+                download
+                className="w-12 h-12 bg-gray-900 dark:bg-blue-600 text-white rounded-2xl flex items-center justify-center transition-all hover:bg-blue-600 dark:hover:bg-blue-500 shadow-xl shadow-gray-200 dark:shadow-blue-500/20 active:scale-90"
+                title={t('download')}
+              >
+                <Download size={20} strokeWidth={2.5} />
+              </a>
+            </motion.div>
+          ) : isFailed ? (
+            <motion.div 
+              key="failed"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-12 h-12 bg-red-50 dark:bg-red-900/10 text-red-500 rounded-2xl flex items-center justify-center border border-red-100 dark:border-red-900/30" 
+              title={task.error_message}
+            >
+              <AlertCircle size={22} />
+            </motion.div>
+          ) : (
+            <div key="placeholder" className="w-12 h-12" />
+          )}
+        </AnimatePresence>
 
-        <button className="w-8 h-8 text-gray-300 dark:text-gray-700 hover:text-gray-900 dark:hover:text-white transition-colors">
-          <MoreVertical size={18} />
+        <button className="w-10 h-10 text-gray-300 dark:text-gray-700 hover:text-gray-900 dark:hover:text-white transition-all hover:bg-gray-50 dark:hover:bg-slate-800 rounded-xl flex items-center justify-center">
+          <MoreVertical size={20} />
         </button>
       </div>
     </motion.div>

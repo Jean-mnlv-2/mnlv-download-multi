@@ -1,8 +1,11 @@
-from .base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, TrackMetadata
 import re
-import tidalapi
+try:
+    import tidalapi
+except ImportError:
+    tidalapi = None
 from django.conf import settings
-from typing import List
+from typing import List, Optional
 
 class TidalProvider(MusicProvider):
     """

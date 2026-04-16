@@ -6,13 +6,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Dépendances système essentielles (FFmpeg pour l'audio, libpq pour PostgreSQL)
+# Dépendances système essentielles (FFmpeg pour l'audio)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    libpq5 \
     curl \
-    build-essential \
-    libpq-dev \
+    libpq5 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,8 +25,8 @@ COPY . .
 # Création des dossiers pour les fichiers statiques et média
 RUN mkdir -p /app/media/downloads /app/staticfiles
 
-# Port par défaut (sera surchargé par docker-compose si nécessaire)
+# Port par défaut
 EXPOSE 8000
 
-# Commande par défaut (utilisée si aucune commande n'est spécifiée dans docker-compose)
+# Commande par défaut
 CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "core.asgi:application"]

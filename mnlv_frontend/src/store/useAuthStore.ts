@@ -11,6 +11,10 @@ interface ProviderStatus {
   spotify: boolean;
   deezer: boolean;
   apple_music: boolean;
+  tidal: boolean;
+  soundcloud: boolean;
+  amazon_music: boolean;
+  youtube_music: boolean;
 }
 
 interface AuthState {
@@ -28,13 +32,23 @@ interface AuthState {
   initialize: () => Promise<void>;
 }
 
+const initialProviderStatus: ProviderStatus = { 
+  spotify: false, 
+  deezer: false, 
+  apple_music: false,
+  tidal: false,
+  soundcloud: false,
+  amazon_music: false,
+  youtube_music: false
+};
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: localStorage.getItem('mnlv_access_token'),
   refreshToken: localStorage.getItem('mnlv_refresh_token'),
   isAuthenticated: false,
   isInitialized: false,
-  providerStatus: { spotify: false, deezer: false, apple_music: false },
+  providerStatus: initialProviderStatus,
 
   login: async (accessToken, refreshToken) => {
     localStorage.setItem('mnlv_access_token', accessToken);
@@ -47,7 +61,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     localStorage.removeItem('mnlv_access_token');
     localStorage.removeItem('mnlv_refresh_token');
-    set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false, providerStatus: { spotify: false, deezer: false, apple_music: false } });
+    set({ 
+      user: null, 
+      accessToken: null, 
+      refreshToken: null, 
+      isAuthenticated: false, 
+      providerStatus: initialProviderStatus 
+    });
   },
 
   fetchProfile: async () => {

@@ -68,6 +68,8 @@ class CreateDownloadTaskSerializer(serializers.Serializer):
         default=DownloadTask.MediaType.AUDIO
     )
     quality = serializers.CharField(required=False, default="192")
+    prefer_video = serializers.BooleanField(default=False)
+    explicit_filter = serializers.BooleanField(default=False)
     
     def validate_quality(self, value: str):
         if value is None:
@@ -94,4 +96,12 @@ class PlaylistManagementSerializer(serializers.Serializer):
     auth_token = serializers.CharField(required=False, allow_null=True, help_text="Jeton OAuth du provider (optionnel si déjà connecté)")
     provider = serializers.CharField(required=False, help_text="Nom du provider (ex: spotify)")
     playlist_id = serializers.CharField(required=False, help_text="ID de la playlist (pour ajout/suppression)")
-    action = serializers.ChoiceField(choices=['CREATE', 'DELETE', 'ADD_TRACKS', 'REMOVE_TRACKS', 'GET_LIST', 'GET_DETAILS'], default='CREATE')
+    action = serializers.ChoiceField(
+        choices=['CREATE', 'DELETE', 'ADD_TRACKS', 'REMOVE_TRACKS', 'GET_LIST', 'GET_DETAILS', 'REORDER', 'GET_LIKES', 'GET_STREAM', 'LIKE_TRACK'], 
+        default='CREATE'
+    )
+    range_start = serializers.IntegerField(required=False)
+    insert_before = serializers.IntegerField(required=False)
+    range_length = serializers.IntegerField(required=False, default=1)
+    snapshot_id = serializers.CharField(required=False, allow_null=True)
+    position = serializers.IntegerField(required=False, allow_null=True)

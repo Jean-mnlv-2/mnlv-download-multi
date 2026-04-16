@@ -17,6 +17,7 @@ export interface Task {
     title: string;
     artist: string;
     cover_url?: string | null;
+    explicit?: boolean;
   };
 }
 

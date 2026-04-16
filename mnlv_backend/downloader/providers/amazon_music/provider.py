@@ -1,9 +1,10 @@
-from .base import MusicProvider, TrackMetadata
+from typing import List, Optional
+from ..base import MusicProvider, TrackMetadata
 import re
 import requests
 from typing import List
 
-class AmazonProvider(MusicProvider):
+class AmazonMusicProvider(MusicProvider):
     """
     Adapteur pour Amazon Music utilisant le scraping HTML des métadonnées.
     Suit le blueprint fonctionnel de SpotifyProvider.

@@ -1,9 +1,12 @@
-from .base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, TrackMetadata
 import re
-from ytmusicapi import YTMusic
-from typing import List
+try:
+    from ytmusicapi import YTMusic
+except ImportError:
+    YTMusic = None
+from typing import List, Optional
 
-class YTMusicProvider(MusicProvider):
+class YouTubeMusicProvider(MusicProvider):
     """
     Adapteur pour YouTube Music utilisant ytmusicapi.
     Sert également de base pour le matching ISRC.

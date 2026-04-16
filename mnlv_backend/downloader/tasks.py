@@ -49,31 +49,41 @@ def process_playlist_item(self, task_id: str):
 def cleanup_old_files():
     """
     Tâche périodique pour nettoyer les fichiers temporaires et les anciens téléchargements.
+    Améliorée pour être plus performante et sélective.
     """
     now = timezone.now()
-    audio_minutes = int(os.getenv("FILE_CLEANUP_MINUTES", "30"))
-    video_minutes = int(os.getenv("VIDEO_FILE_CLEANUP_MINUTES", "15"))
-    tmp_minutes = int(os.getenv("TMP_CLEANUP_MINUTES", "60"))
+    audio_ttl = timedelta(minutes=int(os.getenv("FILE_CLEANUP_MINUTES", "30")))
+    video_ttl = timedelta(minutes=int(os.getenv("VIDEO_FILE_CLEANUP_MINUTES", "15")))
+    tmp_ttl = timedelta(minutes=int(os.getenv("TMP_CLEANUP_MINUTES", "60")))
     
-    tmp_root = os.path.join(settings.MEDIA_ROOT, "tmp")
-    if os.path.exists(tmp_root):
-        for folder in os.listdir(tmp_root):
-            folder_path = os.path.join(tmp_root, folder)
-            if os.path.getmtime(folder_path) < (now - timedelta(minutes=tmp_minutes)).timestamp():
-                shutil.rmtree(folder_path, ignore_errors=True)
-                logger.info(f"Dossier temporaire supprimé : {folder}")
+    tmp_root = Path(settings.MEDIA_ROOT) / "tmp"
+    if tmp_root.exists():
+        for folder in tmp_root.iterdir():
+            if folder.is_dir() and (now - timezone.datetime.fromtimestamp(folder.stat().st_mtime, tz=timezone.utc)) > tmp_ttl:
+                shutil.rmtree(folder, ignore_errors=True)
+                logger.info(f"Dossier temporaire orphelin supprimé : {folder.name}")
 
-    tasks = DownloadTask.objects.all()
-    deleted_count = 0
-    for task in tasks:
-        ttl_minutes = video_minutes if task.media_type == DownloadTask.MediaType.VIDEO else audio_minutes
-        if task.created_at >= now - timedelta(minutes=ttl_minutes):
-            continue
-        if task.result_file:
-            file_path = os.path.join(settings.MEDIA_ROOT, task.result_file.name)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        task.delete()
-        deleted_count += 1
+    expirations = [
+        (DownloadTask.MediaType.AUDIO, audio_ttl),
+        (DownloadTask.MediaType.VIDEO, video_ttl)
+    ]
     
-    logger.info(f"Nettoyage terminé : {deleted_count} tâches supprimées.")
+    total_deleted = 0
+    for m_type, ttl in expirations:
+        expired_tasks = DownloadTask.objects.filter(
+            media_type=m_type,
+            created_at__lt=now - ttl
+        )
+        
+        for task in expired_tasks:
+            if task.result_file:
+                file_path = Path(settings.MEDIA_ROOT) / task.result_file.name
+                if file_path.exists():
+                    file_path.unlink()
+            total_deleted += 1
+            
+        expired_tasks.delete()
+    
+    if total_deleted > 0:
+        logger.info(f"Nettoyage terminé : {total_deleted} tâches et fichiers supprimés.")
+

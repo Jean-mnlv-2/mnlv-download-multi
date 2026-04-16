@@ -22,7 +22,7 @@ class ProviderFactory:
     def initialize():
         """
         Découvre et enregistre automatiquement tous les providers
-        présents dans le dossier 'providers'.
+        présents dans le dossier 'providers' et ses sous-dossiers.
         """
         import importlib
         from pathlib import Path
@@ -30,11 +30,10 @@ class ProviderFactory:
         ProviderFactory._providers = []
         providers_dir = Path(__file__).parent
         
-        for file in providers_dir.glob("*.py"):
-            if file.name in ["__init__.py", "base.py", "factory.py"]:
-                continue
+        for provider_path in providers_dir.rglob("provider.py"):
+            relative_parts = provider_path.relative_to(providers_dir).parts
+            module_name = "." + ".".join([p.replace(".py", "") for p in relative_parts])
             
-            module_name = f".{file.stem}"
             try:
                 module = importlib.import_module(module_name, package="downloader.providers")
                 for name in dir(module):
@@ -42,7 +41,7 @@ class ProviderFactory:
                     if isinstance(obj, type) and issubclass(obj, MusicProvider) and obj is not MusicProvider:
                         ProviderFactory.register_provider(obj)
             except Exception as e:
-                logger.exception("Erreur chargement provider %s", file.name)
+                logger.exception("Erreur chargement provider depuis %s", provider_path)
 
     @staticmethod
     def get_provider(url: str, auth_token: Optional[str] = None) -> MusicProvider:
