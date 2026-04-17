@@ -31,6 +31,12 @@ class DownloadTask(models.Model):
     class MediaType(models.TextChoices):
         AUDIO = 'AUDIO', 'Audio (MP3)'
         VIDEO = 'VIDEO', 'Vidéo (MP4)'
+        WAV = 'WAV', 'Professionnel (WAV)'
+        FLAC = 'FLAC', 'Professionnel (FLAC)'
+        ALAC = 'ALAC', 'Professionnel (ALAC/Apple)'
+        OPUS = 'OPUS', 'WebRadio (OPUS)'
+        AAC = 'AAC', 'WebRadio/TV (AAC)'
+        MKV = 'MKV', 'Haute Qualité Vidéo (MKV)'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     original_url = models.TextField()

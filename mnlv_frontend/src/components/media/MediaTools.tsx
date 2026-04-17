@@ -12,7 +12,8 @@ import {
   FileUp,
   Settings2,
   ChevronRight,
-  Info
+  Info,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -24,7 +25,8 @@ const MediaTools: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [mode, setMode] = useState<'wav' | 'tags'>('wav');
+  const [mode, setMode] = useState<'convert' | 'tags'>('convert');
+  const [targetFormat, setTargetFormat] = useState('WAV');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [metadata, setMetadata] = useState({
@@ -38,6 +40,14 @@ const MediaTools: React.FC = () => {
     if (e.target.files) setFile(e.target.files[0]);
   };
 
+  const FORMATS = [
+    { value: 'WAV', label: 'WAV Professionnel', desc: '44.1kHz / 16-bit PCM' },
+    { value: 'FLAC', label: 'FLAC Studio', desc: 'Lossless Archive' },
+    { value: 'ALAC', label: 'ALAC Apple', desc: 'Apple Lossless' },
+    { value: 'OPUS', label: 'OPUS WebRadio', desc: 'Streaming Latence Basse' },
+    { value: 'AAC', label: 'AAC WebTV', desc: 'Diffusion Standard' },
+  ];
+
   const handleProcess = async () => {
     if (!file) return;
     setLoading(true);
@@ -48,16 +58,18 @@ const MediaTools: React.FC = () => {
     
     if (mode === 'tags') {
       Object.entries(metadata).forEach(([key, value]) => formData.append(key, value));
+    } else {
+      formData.append('format', targetFormat);
     }
 
-    const endpoint = mode === 'wav' ? '/api/media/convert-wav/' : '/api/media/edit-tags/';
+    const endpoint = mode === 'convert' ? '/api/media/convert/' : '/api/media/edit-tags/';
 
     try {
       const response = await axios.post(endpoint, formData);
       setResultUrl(response.data.download_url);
-      addNotification('success', t('completed'));
-    } catch (error) {
-      addNotification('error', t('failed'));
+      addNotification('success', "Traitement terminé avec succès");
+    } catch (error: any) {
+      addNotification('error', error.response?.data?.error || "Échec du traitement");
     } finally {
       setLoading(false);
     }
@@ -68,7 +80,7 @@ const MediaTools: React.FC = () => {
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-black text-xs uppercase tracking-widest">
-            <Wrench size={14} />
+            <Sparkles size={14} />
             <span>Studio Média</span>
           </div>
           <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Outils de Traitement</h2>
@@ -80,8 +92,8 @@ const MediaTools: React.FC = () => {
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-4 border border-gray-100 dark:border-slate-800 shadow-sm flex flex-col gap-2">
             <button
-              onClick={() => { setMode('wav'); setFile(null); setResultUrl(null); }}
-              className={`flex items-center justify-between p-4 rounded-2xl transition-all ${mode === 'wav' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
+              onClick={() => { setMode('convert'); setFile(null); setResultUrl(null); }}
+              className={`flex items-center justify-between p-4 rounded-2xl transition-all ${mode === 'convert' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
             >
               <div className="flex items-center gap-3">
                 <FileAudio size={20} />
@@ -113,7 +125,7 @@ const MediaTools: React.FC = () => {
               type="file" 
               onChange={handleFileChange} 
               className="hidden"
-              accept={mode === 'wav' ? 'audio/*' : '.mp3'}
+              accept={mode === 'convert' ? 'audio/*,video/*' : '.mp3'}
             />
             <div className="w-16 h-16 bg-gray-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
               <FileUp className="text-indigo-600 dark:text-indigo-400" size={32} />
@@ -145,20 +157,35 @@ const MediaTools: React.FC = () => {
               <div className="flex-grow space-y-8">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                    {mode === 'wav' ? <FileAudio size={24} /> : <Settings2 size={24} />}
+                    {mode === 'convert' ? <FileAudio size={24} /> : <Settings2 size={24} />}
                   </div>
                   <div>
                     <h3 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
-                      {mode === 'wav' ? 'Convertir en WAV Professionnel' : 'Modifier les Métadonnées'}
+                      {mode === 'convert' ? `Convertir en ${targetFormat} Professionnel` : 'Modifier les Métadonnées'}
                     </h3>
                     <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-                      {mode === 'wav' ? 'Sortie haute fidélité 44.1kHz / 16-bit' : 'Injection de tags ID3v2.4'}
+                      {mode === 'convert' ? FORMATS.find(f => f.value === targetFormat)?.desc : 'Injection de tags ID3v2.4'}
                     </p>
                   </div>
                 </div>
 
+                {mode === 'convert' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {FORMATS.map((f) => (
+                      <button
+                        key={f.value}
+                        onClick={() => setTargetFormat(f.value)}
+                        className={`flex flex-col items-start p-5 rounded-[2rem] border-2 transition-all ${targetFormat === f.value ? 'bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-500' : 'bg-gray-50 border-transparent dark:bg-slate-800/50 hover:border-gray-200'}`}
+                      >
+                        <span className={`text-sm font-black ${targetFormat === f.value ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-900 dark:text-white'}`}>{f.label}</span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase mt-1">{f.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {mode === 'tags' && (
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Titre</label>
                       <input 
@@ -202,7 +229,7 @@ const MediaTools: React.FC = () => {
                   </div>
                 )}
 
-                {mode === 'wav' && (
+                {mode === 'convert' && targetFormat === 'WAV' && (
                   <div className="p-8 bg-indigo-50 dark:bg-indigo-900/10 rounded-[2rem] border border-indigo-100 dark:border-indigo-900/30 flex items-start gap-4">
                     <Info className="text-indigo-600 dark:text-indigo-400 mt-1 flex-shrink-0" size={20} />
                     <p className="text-sm text-indigo-900 dark:text-indigo-300 font-medium leading-relaxed">

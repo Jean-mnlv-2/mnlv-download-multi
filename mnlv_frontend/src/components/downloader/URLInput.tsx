@@ -20,15 +20,31 @@ const URLInput: React.FC = () => {
   const { t } = useTranslation();
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mediaType, setMediaType] = useState<'AUDIO' | 'VIDEO'>('AUDIO');
+  const [mediaType, setMediaType] = useState<string>('AUDIO');
+  const [quality, setQuality] = useState('320');
   const [preferVideoIfAvailable, setPreferVideoIfAvailable] = useState(true);
   const [explicitFilter, setExplicitFilter] = useState(false);
   const [searchResults, setSearchResults] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const { addTask, pollTaskStatus, addNotification } = useTaskStore();
   const { providerStatus } = useAuthStore();
+
+  const AUDIO_FORMATS = [
+    { value: 'AUDIO', label: 'MP3', desc: 'Standard (320kbps)' },
+    { value: 'WAV', label: 'WAV', desc: 'Pro Lossless' },
+    { value: 'FLAC', label: 'FLAC', desc: 'Pro Studio' },
+    { value: 'ALAC', label: 'ALAC', desc: 'Apple Pro' },
+    { value: 'OPUS', label: 'OPUS', desc: 'WebRadio (Low Latency)' },
+    { value: 'AAC', label: 'AAC', desc: 'WebRadio/TV' },
+  ];
+
+  const VIDEO_FORMATS = [
+    { value: 'VIDEO', label: 'MP4', desc: 'Standard HD' },
+    { value: 'MKV', label: 'MKV', desc: 'High Quality' },
+  ];
 
   const isUrl = useMemo(() => {
     return url.startsWith('http://') || url.startsWith('https://') || url.includes('music.apple.com') || url.includes('spotify.com');
@@ -289,24 +305,66 @@ const URLInput: React.FC = () => {
 
         <div className="absolute inset-y-2.5 right-2.5 flex items-center gap-3">
           <div className="flex bg-gray-50 dark:bg-slate-800/50 p-1.5 rounded-2xl border border-gray-100 dark:border-slate-700/50">
-            <button
-              type="button"
-              onClick={() => setMediaType('AUDIO')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all ${mediaType === 'AUDIO' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
-              title="Audio (MP3)"
-            >
-              <Music size={18} strokeWidth={2.5} />
-              <span className="text-[10px] font-black tracking-widest uppercase hidden md:inline">MP3</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMediaType('VIDEO')}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all ${mediaType === 'VIDEO' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
-              title="Vidéo (MP4)"
-            >
-              <Video size={18} strokeWidth={2.5} />
-              <span className="text-[10px] font-black tracking-widest uppercase hidden md:inline">MP4</span>
-            </button>
+            <div className="relative group/format">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all ${mediaType !== 'VIDEO' && mediaType !== 'MKV' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
+                title="Format Audio"
+              >
+                <Music size={18} strokeWidth={2.5} />
+                <span className="text-[10px] font-black tracking-widest uppercase hidden md:inline">
+                  {AUDIO_FORMATS.find(f => f.value === mediaType)?.label || 'AUDIO'}
+                </span>
+              </button>
+              
+              <AnimatePresence>
+                {showAdvanced && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                    className="absolute bottom-full left-0 mb-4 bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-3xl shadow-2xl p-2 z-[60] min-w-[200px]"
+                  >
+                    <div className="p-3 border-b border-gray-50 dark:border-slate-800 mb-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Formats Audio Pro</span>
+                    </div>
+                    {AUDIO_FORMATS.map((f) => (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => {
+                          setMediaType(f.value);
+                          setShowAdvanced(false);
+                        }}
+                        className={`w-full flex flex-col items-start p-3 rounded-2xl transition-all text-left ${mediaType === f.value ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600' : 'hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400'}`}
+                      >
+                        <span className="text-xs font-black">{f.label}</span>
+                        <span className="text-[9px] font-bold opacity-60 uppercase">{f.desc}</span>
+                      </button>
+                    ))}
+                    <div className="p-3 border-t border-gray-50 dark:border-slate-800 mt-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Formats Vidéo</span>
+                    </div>
+                    {VIDEO_FORMATS.map((f) => (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => {
+                          setMediaType(f.value);
+                          setShowAdvanced(false);
+                        }}
+                        className={`w-full flex flex-col items-start p-3 rounded-2xl transition-all text-left ${mediaType === f.value ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600' : 'hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400'}`}
+                      >
+                        <span className="text-xs font-black">{f.label}</span>
+                        <span className="text-[9px] font-bold opacity-60 uppercase">{f.desc}</span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            
             <div className="w-px h-8 bg-gray-200 dark:bg-slate-700 mx-1 self-center" />
             <button
               type="button"
@@ -319,7 +377,7 @@ const URLInput: React.FC = () => {
             </button>
           </div>
 
-          {mediaType === 'AUDIO' && (
+          {(mediaType === 'AUDIO' || mediaType === 'WAV' || mediaType === 'FLAC') && (
             <button
               type="button"
               onClick={() => setPreferVideoIfAvailable(!preferVideoIfAvailable)}

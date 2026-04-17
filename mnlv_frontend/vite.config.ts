@@ -13,6 +13,13 @@ export default defineConfig({
   server: {
     port: 3003,
     host: true,
+    strictPort: true,
+    hmr: {
+      clientPort: 3003,
+    },
+    watch: {
+      usePolling: true,
+    },
     proxy: {
       '/api': {
         target: 'http://api:8002',
@@ -24,6 +31,11 @@ export default defineConfig({
       },
       '/static': {
         target: 'http://api:8002',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://api:8002',
+        ws: true,
         changeOrigin: true,
       },
     },

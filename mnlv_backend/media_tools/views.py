@@ -8,16 +8,18 @@ from .services import MediaService
 import os
 from pathlib import Path
 
-class MediaConvertWavView(APIView):
+class MediaConvertView(APIView):
     """
-    Endpoint POST /api/media/convert-wav/
-    Upload un fichier et le retourne converti en WAV.
+    Endpoint POST /api/media/convert/
+    Upload un fichier et le retourne converti vers le format demandé (WAV, FLAC, OPUS, etc.).
     """
     parser_classes = [MultiPartParser]
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         file_obj = request.data.get('file')
+        target_format = request.data.get('format', 'WAV').upper()
+        
         if not file_obj:
             return Response({"error": "Aucun fichier fourni"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -26,18 +28,16 @@ class MediaConvertWavView(APIView):
         full_path = os.path.join(default_storage.location, path)
 
         try:
-            wav_path = MediaService.convert_to_wav(full_path)
-            relative_wav_path = os.path.relpath(wav_path, default_storage.location)
+            converted_path = MediaService.convert_to_format(full_path, target_format)
+            relative_path = os.path.relpath(converted_path, default_storage.location)
             
             return Response({
-                "message": "Conversion réussie",
-                "download_url": f"/media/{relative_wav_path}"
+                "message": f"Conversion vers {target_format} réussie",
+                "download_url": f"/media/{relative_path}"
             }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        finally:
-            # On garde le fichier temporaire un moment ou on nettoie via une tâche Celery plus tard
-            pass
+
 
 class MediaEditTagsView(APIView):
     """

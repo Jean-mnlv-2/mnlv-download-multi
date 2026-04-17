@@ -137,9 +137,9 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '10/hour',
-        'user': '100/day',
-        'downloads': '10/hour',
+        'anon': '100/hour',
+        'user': '1000/day',
+        'downloads': '500/hour',
     }
 }
 
@@ -200,6 +200,8 @@ APPLE_MUSIC_TEAM_ID = os.getenv('APPLE_MUSIC_TEAM_ID')
 APPLE_MUSIC_KEY_ID = os.getenv('APPLE_MUSIC_KEY_ID')
 APPLE_MUSIC_SECRET_KEY = os.getenv('APPLE_MUSIC_SECRET_KEY')
 APPLE_MUSIC_API_BASE = os.getenv('APPLE_MUSIC_API_BASE', 'https://api.music.apple.com/v1')
+
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3003')
 
 CELERY_BEAT_SCHEDULE = {
     'cleanup-old-files-every-30m': {

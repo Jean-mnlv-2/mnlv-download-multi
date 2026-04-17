@@ -13,19 +13,44 @@ class MediaService:
     """
 
     @staticmethod
-    def convert_to_wav(input_path: str) -> str:
+    def convert_to_format(input_path: str, target_format: str) -> str:
         """
-        Convertit un fichier audio en WAV via FFmpeg.
+        Convertit un fichier media vers un format cible via FFmpeg.
+        Supporte les formats pro (WAV, FLAC, ALAC) et WebRadio/TV (OPUS, AAC).
         """
         input_file = Path(input_path)
-        output_file = input_file.with_suffix('.wav')
+        ext = f".{target_format.lower()}"
+        output_file = input_file.with_suffix(ext)
+        
+        cmd = ['ffmpeg', '-y', '-i', str(input_file)]
+        
+        if target_format == 'FLAC':
+            cmd += ['-c:a', 'flac']
+        elif target_format == 'ALAC':
+            cmd += ['-c:a', 'alac']
+        elif target_format == 'WAV':
+            cmd += ['-c:a', 'pcm_s16le']
+        elif target_format == 'OPUS':
+            cmd += ['-c:a', 'libopus', '-b:a', '128k']
+        elif target_format == 'AAC':
+            cmd += ['-c:a', 'aac', '-b:a', '256k']
+        elif target_format == 'MKV':
+            cmd += ['-c:v', 'copy', '-c:a', 'copy']
+            
+        cmd.append(str(output_file))
         
         try:
-            subprocess.run(['ffmpeg', '-y', '-i', str(input_file), str(output_file)], 
-                         check=True, capture_output=True)
+            subprocess.run(cmd, check=True, capture_output=True)
             return str(output_file)
         except subprocess.CalledProcessError as e:
-            raise Exception(f"Erreur FFmpeg : {e.stderr.decode()}")
+            raise Exception(f"Erreur FFmpeg ({target_format}) : {e.stderr.decode()}")
+
+    @staticmethod
+    def convert_to_wav(input_path: str) -> str:
+        """
+        Ancienne méthode pour compatibilité WAV uniquement.
+        """
+        return MediaService.convert_to_format(input_path, 'WAV')
 
     @staticmethod
     def apply_metadata(file_path: str, metadata: dict, is_video: bool = False):

@@ -26,8 +26,16 @@ class AppleMusicProvider(MusicProvider):
         if self._am is None:
             if not AppleMusic:
                 raise ImportError("applemusicpy n'est pas installé.")
+            
+            secret_key = settings.APPLE_MUSIC_SECRET_KEY
+            if secret_key and isinstance(secret_key, str):
+                if "\\n" in secret_key:
+                    secret_key = secret_key.replace("\\n", "\n")
+                if "-----BEGIN PRIVATE KEY-----" not in secret_key:
+                    secret_key = f"-----BEGIN PRIVATE KEY-----\n{secret_key}\n-----END PRIVATE KEY-----"
+            
             self._am = AppleMusic(
-                secret_key=settings.APPLE_MUSIC_SECRET_KEY,
+                secret_key=secret_key,
                 key_id=settings.APPLE_MUSIC_KEY_ID,
                 team_id=settings.APPLE_MUSIC_TEAM_ID
             )

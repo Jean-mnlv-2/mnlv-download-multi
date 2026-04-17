@@ -68,11 +68,17 @@ class DownloadEngine:
             self.task.save(update_fields=['track'])
 
             is_video_mode = (
-                self.task.media_type == DownloadTask.MediaType.VIDEO or 
+                self.task.media_type in [DownloadTask.MediaType.VIDEO, DownloadTask.MediaType.MKV] or 
                 (metadata.is_video and self.task.prefer_video)
             )
             
-            ext = "mp3" if not is_video_mode else "mp4"
+            if self.task.media_type == DownloadTask.MediaType.AUDIO:
+                ext = "mp3"
+            elif self.task.media_type == DownloadTask.MediaType.VIDEO:
+                ext = "mp4"
+            else:
+                ext = self.task.media_type.lower()
+            
             safe_name = f"{metadata.artist} - {metadata.title}.{ext}".replace("/", "_").replace("\\", "_")
             final_dest = Path(settings.MEDIA_ROOT) / "downloads" / safe_name
             
@@ -80,7 +86,7 @@ class DownloadEngine:
                 self.task.result_file = f"downloads/{safe_name}"
                 self.task.status = DownloadTask.Status.COMPLETED
                 self.task.progress = 100
-                self.task.save(update_fields=['result_file', 'status', 'progress'])
+                self.task.save(update_fields=['result_file', 'status', 'progress', 'updated_at'])
                 return
 
             search_query = self.matcher.find_best_match(metadata)
@@ -95,7 +101,7 @@ class DownloadEngine:
                     'progress_hooks': [self._progress_hook],
                     'postprocessors': [{
                         'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
+                        'preferredcodec': 'mp3' if self.task.media_type == DownloadTask.MediaType.AUDIO else 'wav',
                         'preferredquality': self.task.quality or '192',
                     }],
                 }
@@ -106,23 +112,39 @@ class DownloadEngine:
                     'outtmpl': output_template,
                     'noplaylist': True,
                     'progress_hooks': [self._progress_hook],
-                    'merge_output_format': 'mp4',
+                    'merge_output_format': 'mp4' if self.task.media_type == DownloadTask.MediaType.VIDEO else 'mkv',
                 }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([search_query])
 
-            final_file = self.temp_dir / f"{self.task.id}.{ext}"
-            if not final_file.exists():
-                found = list(self.temp_dir.glob(f"{self.task.id}.*"))
-                if found: final_file = found[0]
-                else: raise FileNotFoundError("Le moteur n'a pas pu générer le fichier final.")
+            downloaded_file = None
+            for f in self.temp_dir.glob(f"{self.task.id}.*"):
+                downloaded_file = f
+                break
+            
+            if not downloaded_file:
+                raise FileNotFoundError("Le moteur n'a pas pu télécharger le fichier source.")
 
-            MediaService.apply_metadata(
-                str(final_file), 
-                metadata.__dict__, 
-                is_video=is_video_mode
-            )
+            pro_formats = [
+                DownloadTask.MediaType.FLAC, 
+                DownloadTask.MediaType.ALAC, 
+                DownloadTask.MediaType.OPUS, 
+                DownloadTask.MediaType.AAC,
+                DownloadTask.MediaType.WAV
+            ]
+            
+            final_file = downloaded_file
+            if self.task.media_type in pro_formats:
+                self.logger.info(f"Conversion vers format Pro/WebRadio : {self.task.media_type}")
+                final_file = Path(MediaService.convert_to_format(str(downloaded_file), self.task.media_type))
+
+            if self.task.media_type in [DownloadTask.MediaType.AUDIO, DownloadTask.MediaType.VIDEO]:
+                MediaService.apply_metadata(
+                    str(final_file), 
+                    metadata.__dict__, 
+                    is_video=is_video_mode
+                )
 
             final_dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(final_file), str(final_dest))

@@ -5,6 +5,7 @@ from rest_framework_simplejwt.views import (
 )
 from .views import (
     SubmitDownloadView, 
+    BulkDownloadView,
     DownloadTaskStatusView, 
     DownloadFileView,
     HealthCheckView,
@@ -15,6 +16,9 @@ from .views import (
     SpotifyLoginView,
     SpotifyCallbackView,
     DeezerLoginView,
+    SoundCloudLoginView,
+    AmazonMusicLoginView,
+    TidalLoginView,
     AppleMusicLoginView,
     AppleMusicTokenView,
     AppleMusicPlaylistsView,
@@ -24,8 +28,8 @@ from .views import (
     DeezerSearchView,
     DeezerChartsView
 )
-from csv_handler.views import CSVUploadView
-from media_tools.views import MediaConvertWavView, MediaEditTagsView
+from csv_handler.views import CSVUploadView, PendingUploadsView
+from media_tools.views import MediaConvertView, MediaEditTagsView
 
 app_name = 'api'
 
@@ -42,6 +46,9 @@ urlpatterns = [
     path('auth/providers/spotify/login/', SpotifyLoginView.as_view(), name='spotify_login'),
     path('auth/providers/spotify/callback/', SpotifyCallbackView.as_view(), name='spotify_callback'),
     path('auth/providers/deezer/login/', DeezerLoginView.as_view(), name='deezer_login'),
+    path('auth/providers/soundcloud/login/', SoundCloudLoginView.as_view(), name='soundcloud_login'),
+    path('auth/providers/amazon-music/login/', AmazonMusicLoginView.as_view(), name='amazon_music_login'),
+    path('auth/providers/tidal/login/', TidalLoginView.as_view(), name='tidal_login'),
     path('auth/providers/deezer/flow/', DeezerFlowView.as_view(), name='deezer_flow'),
     path('auth/providers/deezer/favorites/', DeezerFavoritesView.as_view(), name='deezer_favorites'),
     path('auth/providers/deezer/search/', DeezerSearchView.as_view(), name='deezer_search'),
@@ -50,9 +57,12 @@ urlpatterns = [
     path('auth/providers/apple-music/token/', AppleMusicTokenView.as_view(), name='apple_music_token'),
     path('auth/providers/apple-music/playlists/', AppleMusicPlaylistsView.as_view(), name='apple_music_playlists'),
     path('auth/providers/apple-music/search/', AppleMusicSearchView.as_view(), name='apple_music_search'),
+    path('auth/providers/amazon-music/login/', AmazonMusicLoginView.as_view(), name='amazon_music_login'),
+    path('auth/providers/tidal/login/', TidalLoginView.as_view(), name='tidal_login'),
 
     # Downloads
     path('download/', SubmitDownloadView.as_view(), name='submit_download'),
+    path('download/bulk/', BulkDownloadView.as_view(), name='bulk_download'),
     path('task/<uuid:id>/status/', DownloadTaskStatusView.as_view(), name='task_status'),
     path('task/<uuid:task_id>/download/', DownloadFileView.as_view(), name='task_download'),
 
@@ -61,8 +71,9 @@ urlpatterns = [
 
     # CSV/Batch
     path('csv/upload/', CSVUploadView.as_view(), name='csv_upload'),
+    path('csv/pending/', PendingUploadsView.as_view(), name='csv_pending'),
 
     # Media Tools
-    path('media/convert-wav/', MediaConvertWavView.as_view(), name='convert_wav'),
-    path('media/edit-tags/', MediaEditTagsView.as_view(), name='edit_tags'),
+    path('media/convert/', MediaConvertView.as_view(), name='media_convert'),
+    path('media/edit-tags/', MediaEditTagsView.as_view(), name='media_edit_tags'),
 ]

@@ -112,8 +112,8 @@ class SpotifyProvider(MusicProvider):
         }
 
     def supports_url(self, url: str) -> bool:
-        """Vérifie si l'URL est de type spotify.com"""
-        return bool(re.search(r"open\.spotify\.com/(track|album|playlist)/", url))
+        """Vérifie si l'URL est de type spotify.com (supporte les URLs internationales intl-xx)"""
+        return bool(re.search(r"open\.spotify\.com/(?:[a-z]{2,3}-[a-z]{2,3}/)?(track|album|playlist|episode|artist|show)/", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un épisode Spotify"""

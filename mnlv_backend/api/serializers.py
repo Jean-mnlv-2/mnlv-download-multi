@@ -77,9 +77,9 @@ class CreateDownloadTaskSerializer(serializers.Serializer):
         normalized = str(value).strip().lower()
         normalized = normalized.replace("kbps", "").replace("k", "")
         normalized = normalized.strip()
-        if normalized in {"192", "320"}:
+        if normalized in {"128", "192", "256", "320", "720", "1080"}:
             return normalized
-        raise serializers.ValidationError("Qualité invalide. Valeurs supportées: 192 ou 320.")
+        return "192"
 
 class PlaylistManagementSerializer(serializers.Serializer):
     """
