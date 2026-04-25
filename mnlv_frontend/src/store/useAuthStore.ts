@@ -15,6 +15,7 @@ interface ProviderStatus {
   soundcloud: boolean;
   amazon_music: boolean;
   youtube_music: boolean;
+  boomplay: boolean;
 }
 
 interface AuthState {
@@ -39,7 +40,8 @@ const initialProviderStatus: ProviderStatus = {
   tidal: false,
   soundcloud: false,
   amazon_music: false,
-  youtube_music: false
+  youtube_music: false,
+  boomplay: false
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -78,7 +80,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const response = await axios.get('/api/auth/profile/');
       set({ user: response.data, isAuthenticated: true });
     } catch (error) {
-      console.error('Error fetching profile:', error);
       get().logout();
     }
   },
@@ -90,9 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await axios.get('/api/auth/providers/status/');
       set({ providerStatus: response.data });
-    } catch (error) {
-      console.error('Error fetching provider status:', error);
-    }
+    } catch (error) {}
   },
 
   initialize: async () => {

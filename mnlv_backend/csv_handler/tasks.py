@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 from celery import shared_task
 from django.contrib.auth.models import User
 from downloader.models import DownloadTask
@@ -36,7 +37,8 @@ def process_csv_file_task(user_id, file_content_b64, filename):
         track_list = FileParserService.parse_file(file_obj)
         logger.info(f"{len(track_list)} lignes extraites de {filename}")
         
-        track_list = track_list[:500]
+        max_tracks = int(os.getenv("MAX_PLAYLIST_TRACKS", "500"))
+        track_list = track_list[:max_tracks]
         resolved_tracks = FileParserService.resolve_tracks(track_list)
         
         tasks_to_create = []

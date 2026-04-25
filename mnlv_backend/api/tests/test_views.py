@@ -31,3 +31,21 @@ class ApiViewsTest(TestCase):
         url = reverse('api:task_status', kwargs={'id': uuid.uuid4()})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_provider_status_view(self):
+        """Vérifie le retour du statut des providers"""
+        from api.models import ProviderAuth
+        ProviderAuth.objects.create(user=self.user, provider='spotify', access_token='token')
+        ProviderAuth.objects.create(user=self.user, provider='boomplay', access_token='token')
+        
+        url = reverse('api:provider_status')
+        response = self.client.get(url)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['spotify'])
+        self.assertTrue(response.data['boomplay'])
+        self.assertFalse(response.data['deezer'])
+        self.assertFalse(response.data['tidal'])
+        self.assertFalse(response.data['amazon_music'])
+        self.assertFalse(response.data['youtube_music'])
+        self.assertFalse(response.data['soundcloud'])

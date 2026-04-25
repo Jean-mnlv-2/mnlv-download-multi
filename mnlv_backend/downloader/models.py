@@ -70,6 +70,15 @@ class DownloadTask(models.Model):
             channel_layer = get_channel_layer()
             group_name = f"user_{self.user.id}_tasks"
             
+            track_data = None
+            if self.track:
+                track_data = {
+                    "title": self.track.title,
+                    "artist": self.track.artist,
+                    "album": self.track.album,
+                    "cover_url": self.track.cover_url
+                }
+
             async_to_sync(channel_layer.group_send)(
                 group_name,
                 {
@@ -79,7 +88,8 @@ class DownloadTask(models.Model):
                         "status": self.status,
                         "progress": self.progress,
                         "error": self.error_message,
-                        "result_file": self.result_file.url if self.result_file else None
+                        "result_file": self.result_file.url if self.result_file else None,
+                        "track": track_data
                     }
                 }
             )

@@ -63,7 +63,7 @@ class YouTubeMusicProvider(MusicProvider):
 
     def supports_url(self, url: str) -> bool:
         """Vérifie si l'URL est de type music.youtube.com"""
-        return bool(re.search(r"music\.youtube\.com/(watch\?v=|playlist\?list=)", url))
+        return bool(re.search(r"music\.youtube\.com", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre YT Music via son ID"""
@@ -71,12 +71,20 @@ class YouTubeMusicProvider(MusicProvider):
         track = self.yt.get_song(video_id)
         details = track.get('videoDetails', {})
         
+        isrc = None
+        try:
+            microformat = track.get('microformat', {}).get('microformatDataRenderer', {})
+            isrc = track.get('isrc')
+        except:
+            pass
+
         return TrackMetadata(
             title=details.get('title'),
             artist=details.get('author'),
             album=None,
             cover_url=details.get('thumbnail', {}).get('thumbnails', [{}])[-1].get('url'),
             duration_ms=int(details.get('lengthSeconds', 0)) * 1000,
+            isrc=isrc,
             provider="youtube_music",
             original_url=url
         )

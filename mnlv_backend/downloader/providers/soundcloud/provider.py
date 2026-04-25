@@ -15,9 +15,12 @@ class SoundCloudProvider(MusicProvider):
         self.auth_token = auth_token
         self.api_base = getattr(settings, 'SOUNDCLOUD_API_BASE', 'https://api.soundcloud.com')
         self.client_id = getattr(settings, 'SOUNDCLOUD_CLIENT_ID', None)
+        self.client_secret = getattr(settings, 'SOUNDCLOUD_CLIENT_SECRET', None)
         self._session = requests.Session()
         if self.auth_token:
             self._session.headers.update({"Authorization": f"OAuth {self.auth_token}"})
+        elif self.client_id:
+            self._session.params.update({"client_id": self.client_id})
 
     def supports_url(self, url: str) -> bool:
         return bool(re.search(r"soundcloud\.com/.*?/.*?", url))
@@ -28,8 +31,6 @@ class SoundCloudProvider(MusicProvider):
             return self._resolve_fallback(url)
             
         params = {"url": url}
-        if not self.auth_token:
-            params["client_id"] = self.client_id
             
         response = self._session.get(f"{self.api_base}/resolve", params=params)
         if response.status_code == 200:
@@ -124,13 +125,19 @@ class SoundCloudProvider(MusicProvider):
             upload_date = info.get('upload_date', '0000')
             release_year = int(upload_date[:4]) if upload_date else None
 
+        raw_duration = info.get('duration', 0)
+        if 'kind' in info:
+            duration_ms = int(raw_duration)
+        else:
+            duration_ms = int(raw_duration) * 1000
+
         return TrackMetadata(
             title=title,
             artist=artist,
             album=info.get('album'),
             release_year=release_year,
             cover_url=cover_url,
-            duration_ms=int(info.get('duration', 0)) if 'duration' in info and info['duration'] > 5000 else int(info.get('duration', 0)) * 1000,
+            duration_ms=duration_ms,
             explicit=info.get('explicit', False) or 'explicit' in title.lower(),
             provider="soundcloud",
             original_url=info.get('permalink_url') or info.get('webpage_url') or info.get('url')

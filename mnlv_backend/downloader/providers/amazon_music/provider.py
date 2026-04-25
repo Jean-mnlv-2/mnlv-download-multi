@@ -14,7 +14,7 @@ class AmazonMusicProvider(MusicProvider):
 
     def supports_url(self, url: str) -> bool:
         """Vérifie si l'URL est de type music.amazon.com"""
-        return bool(re.search(r"music\.amazon\..*?/(albums|tracks|playlists)/", url))
+        return bool(re.search(r"music\.amazon", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre Amazon Music via scraping"""

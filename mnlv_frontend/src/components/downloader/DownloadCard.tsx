@@ -1,5 +1,6 @@
 import React from 'react';
 import { Task } from '../../store/useTaskStore';
+import { LocalFileSystemService } from '../../services/localFileSystem';
 import { 
   Play, 
   Download, 
@@ -13,10 +14,13 @@ import {
   Disc,
   Radio,
   Cloud,
-  Youtube
+  Youtube,
+  Trash2,
+  FolderOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import ProviderIcon from './ProviderIcon';
 
 interface DownloadCardProps {
   task: Task;
@@ -30,18 +34,6 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
   const isProcessing = task.status === 'PROCESSING' || task.status === 'PENDING';
   const isVideo = task.result_file?.endsWith('.mp4') || task.result_file_url?.endsWith('.mp4');
 
-  const providerIcons: { [key: string]: any } = {
-    'spotify': Disc,
-    'deezer': Radio,
-    'apple_music': Music,
-    'youtube_music': Youtube,
-    'soundcloud': Cloud,
-    'tidal': Disc,
-    'amazon_music': Disc
-  };
-
-  const ProviderIcon = (task.provider && providerIcons[task.provider]) || Music;
-
   const downloadHref = (() => {
     const raw = task.result_file_url || task.result_file;
     if (!raw) return null;
@@ -50,6 +42,49 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
     if (raw.startsWith('media/')) return `/${raw}`;
     return `/media/${raw.startsWith('/') ? raw.slice(1) : raw}`;
   })();
+
+  const handleLocalDownload = async () => {
+    try {
+      const finalUrl = `/api/task/${task.id}/download/`;
+      
+      const response = await fetch(finalUrl, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('mnlv_access_token')}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de la récupération du fichier');
+      }
+
+      const blob = await response.blob();
+      const fileExtension = task.result_file?.split('.').pop() || 'mp3';
+      let suggestedName = "";
+      
+      if (task.track && task.track.title && task.track.artist) {
+        suggestedName = `${task.track.artist} - ${task.track.title}.${fileExtension}`;
+      } else if (task.title) {
+        suggestedName = `${task.title}.${fileExtension}`;
+      } else {
+        suggestedName = `download-${task.id.slice(0, 8)}.${fileExtension}`;
+      }
+
+      const saved = await LocalFileSystemService.saveFile(blob, suggestedName, task.save_to_dir, true);
+      
+      if (saved) {
+        return;
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', suggestedName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {}
+  };
 
   return (
     <motion.div 
@@ -69,7 +104,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
               alt={task.track.title} 
               className="w-full h-full object-cover transition-transform duration-700 group-hover/thumb:scale-110"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=No+Cover';
+                (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Music&background=random';
               }}
             />
           ) : (
@@ -111,9 +146,9 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
               {task.track?.title || (isProcessing ? 'Initialisation...' : t('processing'))}
             </h3>
             <div className="flex items-center gap-2 mt-0.5">
-              <ProviderIcon size={12} className="text-gray-400" />
+              <ProviderIcon provider={task.provider} size={14} />
               <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 truncate uppercase tracking-widest">
-                {task.track?.artist || (isProcessing ? 'Recherche des infos...' : 'Source externe')}
+                {task.track?.artist || (isProcessing ? (task.message || 'Préparation...') : 'Source externe')}
               </p>
               {task.track?.explicit && (
                 <span className="text-[8px] font-black bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded-sm border border-gray-200 dark:border-slate-700">
@@ -124,7 +159,7 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
           </div>
           <div className="flex flex-col items-end gap-1">
             <span className="text-[9px] font-black bg-gray-50 dark:bg-slate-800 text-gray-400 dark:text-gray-500 px-2.5 py-1 rounded-full uppercase tracking-widest border border-gray-100 dark:border-slate-700">
-              {task.provider || 'URL'}
+              {task.media_type}
             </span>
             {isVideo && (
               <span className="text-[9px] font-black bg-blue-50 dark:bg-blue-900/20 text-blue-500 px-2.5 py-1 rounded-full uppercase tracking-widest border border-blue-100/50 dark:border-blue-800/50">
@@ -140,30 +175,51 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
             <div className="flex items-center gap-1.5">
               {isFailed ? (
                 <span className="text-red-500 flex items-center gap-1">
-                  <AlertCircle size={10} /> {t('failed')}
+                  <AlertCircle size={10} /> Échec
                 </span>
               ) : isCompleted ? (
                 <span className="text-green-500 flex items-center gap-1">
-                  <CheckCircle2 size={10} /> {t('completed')}
+                  <CheckCircle2 size="10" /> Terminé
                 </span>
               ) : (
-                <span className="text-blue-500 flex items-center gap-1">
-                  <Loader2 size={10} className="animate-spin" /> {task.progress > 0 ? 'Téléchargement' : 'En attente'}
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-blue-500 flex items-center gap-1">
+                    <Loader2 size={10} className="animate-spin" /> 
+                    {task.message && (
+                    <span className="animate-pulse truncate max-w-[150px]">{task.message}</span>
+                  )}
+                  {(!task.message && task.progress > 0) && <span>Téléchargement</span>}
+                  {(!task.message && task.progress === 0) && <span>En attente</span>}
                 </span>
+                {!isCompleted && !isFailed && (task.speed || task.eta) && (
+                  <span className="text-[8px] text-gray-400 lowercase font-medium flex items-center gap-1">
+                    {task.speed && <span>{task.speed}</span>}
+                    {task.speed && task.eta && <span>•</span>}
+                    {task.eta && <span>{task.eta} restant</span>}
+                  </span>
+                )}
+                </div>
               )}
             </div>
-            <span className={isCompleted ? 'text-green-500' : 'text-gray-500'}>
+            <span className={isCompleted ? 'text-green-500' : 'text-gray-500 font-mono'}>
               {isFailed ? 'Error' : isCompleted ? '100%' : `${task.progress}%`}
             </span>
           </div>
-          <div className="h-2.5 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-gray-50 dark:border-slate-700/50">
+          <div className="h-2.5 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-gray-50 dark:border-slate-700/50 relative">
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: isFailed ? '100%' : `${task.progress}%` }}
-              className={`h-full rounded-full transition-all duration-700 ${
+              className={`h-full rounded-full transition-all duration-700 relative z-10 ${
                 isFailed ? 'bg-red-500/20' : isCompleted ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.4)]' : 'bg-gradient-to-r from-blue-600 to-indigo-500 shadow-[0_0_12px_rgba(37,99,235,0.3)]'
               }`}
             />
+            {!isCompleted && !isFailed && (
+              <motion.div 
+                animate={{ x: ['-100%', '200%'] }}
+                transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent z-20 w-1/2"
+              />
+            )}
           </div>
         </div>
       </div>
@@ -187,14 +243,13 @@ const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreviewVideo }) => 
                   <Play size={20} fill="currentColor" />
                 </button>
               )}
-              <a
-                href={downloadHref}
-                download
+              <button
+                onClick={handleLocalDownload}
                 className="w-12 h-12 bg-gray-900 dark:bg-blue-600 text-white rounded-2xl flex items-center justify-center transition-all hover:bg-blue-600 dark:hover:bg-blue-500 shadow-xl shadow-gray-200 dark:shadow-blue-500/20 active:scale-90"
-                title={t('download')}
+                title="Enregistrer sous..."
               >
-                <Download size={20} strokeWidth={2.5} />
-              </a>
+                <FolderOpen size={20} strokeWidth={2.5} />
+              </button>
             </motion.div>
           ) : isFailed ? (
             <motion.div 

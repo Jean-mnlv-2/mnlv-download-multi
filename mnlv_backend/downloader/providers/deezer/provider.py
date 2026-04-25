@@ -146,8 +146,8 @@ class DeezerProvider(MusicProvider):
         }
 
     def supports_url(self, url: str) -> bool:
-        """Vérifie si l'URL est de type deezer.com (tracks, albums, playlists, podcasts, radios)"""
-        return bool(re.search(r"deezer\.com/(?:\w{2}/)?(track|album|playlist|podcast|show|radio)/", url))
+        """Vérifie si l'URL est une URL Deezer valide"""
+        return bool(re.search(r"(www)?\.?deezer\.com", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un épisode de podcast"""

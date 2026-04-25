@@ -28,13 +28,20 @@ class StandardizedErrorMixin:
 
     def handle_exception(self, exc):
         """
-        Intercepte les exceptions non gérées pour retourner une erreur 500 propre.
-        Laisse passer les exceptions DRF pour qu'elles retournent leur code (401, 403, etc.).
+        Intercepte les exceptions non gérées pour retourner une erreur propre.
         """
         from rest_framework.exceptions import APIException
         if isinstance(exc, APIException):
             return super().handle_exception(exc)
             
+        exc_str = str(exc).lower()
+        if "expired" in exc_str or "401" in exc_str or "unauthorized" in exc_str:
+            return self.error_response(
+                message="Votre session avec le service de musique a expiré. Veuillez vous reconnecter.",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                error_code="AUTH_EXPIRED"
+            )
+
         logger.exception(f"Exception non gérée : {exc}")
         return self.error_response(
             message=f"Erreur interne du serveur : {str(exc)}",

@@ -9,6 +9,9 @@ import PlaylistExplorer from './components/downloader/PlaylistExplorer';
 import MediaTools from './components/media/MediaTools';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
+import ProviderManager from './components/auth/ProviderManager';
+import HistoryView from './components/downloader/HistoryView';
+import AdsDashboard from './components/ads/AdsDashboard';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Toaster } from 'react-hot-toast';
@@ -27,8 +30,11 @@ import {
   Radio, 
   Cloud, 
   Youtube,
+  Megaphone,
   TrendingUp,
-  Library
+  Library,
+  History,
+  XCircle
 } from 'lucide-react';
 
 const NotificationToast: React.FC<{ notification: Notification; onRemove: (id: string) => void }> = ({ notification, onRemove }) => {
@@ -64,11 +70,40 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [previewVideo, setPreviewVideo] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'downloader' | 'playlists' | 'media' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'downloader' | 'playlists' | 'ads' | 'media' | 'history' | 'settings'>('downloader');
   const [darkMode, setDarkMode] = useState(localStorage.getItem('theme') === 'dark');
 
-  const { tasks, clearCompleted, notifications, removeNotification, addNotification, connectWebSocket, addTask, pollTaskStatus } = useTaskStore();
-  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken, providerStatus } = useAuthStore();
+  const { 
+    tasks, 
+    clearCompleted, 
+    notifications, 
+    removeNotification, 
+    addNotification, 
+    connectWebSocket, 
+    addTask, 
+    pollTaskStatus, 
+    fetchHistory,
+    cancelAllTasks
+  } = useTaskStore();
+  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken, providerStatus, fetchProviderStatus } = useAuthStore();
+
+  const handleCancelAll = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Empêcher la redirection vers l'onglet downloader
+    if (window.confirm("Voulez-vous vraiment annuler toutes les tâches en cours ?")) {
+      await cancelAllTasks();
+    }
+  };
+
+  useEffect(() => {
+    const initFS = async () => {
+      const { LocalFileSystemService } = await import('./services/localFileSystem');
+      const success = await LocalFileSystemService.initialize();
+      if (success) {
+        useTaskStore.getState().setLocalDirectorySelected(true);
+      }
+    };
+    initFS();
+  }, []);
 
   const handleQuickDownload = async (url: string) => {
     try {
@@ -80,10 +115,12 @@ const App: React.FC = () => {
           pollTaskStatus(t.task_id);
         });
         addNotification('success', `${data.tasks.length} titres ajoutés`);
+        fetchHistory();
       } else {
         addTask({ id: data.task_id, status: 'PENDING', progress: 0, original_url: url, provider: data.provider || 'URL' });
         pollTaskStatus(data.task_id);
         addNotification('info', 'Téléchargement lancé');
+        fetchHistory();
       }
     } catch (error) {
       addNotification('error', 'Erreur de téléchargement');
@@ -97,8 +134,28 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated && accessToken) {
       connectWebSocket(accessToken);
+      fetchHistory();
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const authSuccess = urlParams.get('auth_success');
+      const authError = urlParams.get('auth_error');
+      const reason = urlParams.get('reason');
+
+      if (authSuccess) {
+        addNotification('success', `Compte ${authSuccess} connecté avec succès !`);
+        fetchProviderStatus();
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (authError) {
+        let message = `Erreur lors de la connexion ${authError}`;
+        if (reason === 'access_denied') message = "Connexion refusée par l'utilisateur.";
+        else if (reason === 'invalid_scope') message = "Configuration des permissions invalide.";
+        else if (reason === 'missing_parameters') message = "Paramètres de connexion manquants.";
+        
+        addNotification('error', message);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
     }
-  }, [isAuthenticated, accessToken, connectWebSocket]);
+  }, [isAuthenticated, accessToken, connectWebSocket, fetchProviderStatus, addNotification]);
 
   useEffect(() => {
     if (darkMode) {
@@ -139,19 +196,27 @@ const App: React.FC = () => {
 
   const activeTasksCount = Object.values(tasks).filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length;
 
-  const NavItem = ({ id, icon: Icon, label }: { id: any, icon: any, label: string }) => (
-    <button
-      onClick={() => setActiveTab(id)}
-      className={`flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group ${
-        activeTab === id 
-          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' 
-          : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-slate-900'
-      }`}
-    >
-      <Icon size={20} className={`${activeTab === id ? 'text-white' : 'text-gray-400 group-hover:text-blue-500'} transition-colors`} />
-      <span className="font-bold text-sm tracking-tight">{label}</span>
-    </button>
-  );
+  const handleTaskCounterClick = () => {
+    setActiveTab('downloader');
+    // On pourrait ajouter un filtre ou scroller vers les tâches actives si nécessaire
+  };
+
+  const NavItem = ({ id, icon, label }: { id: any, icon: any, label: string }) => {
+    const Icon = icon;
+    return (
+      <button
+        onClick={() => setActiveTab(id as any)}
+        className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-sm transition-all duration-300 ${
+          activeTab === id 
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/30 translate-x-1' 
+            : 'text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-slate-800'
+        }`}
+      >
+        <Icon size={20} strokeWidth={2.5} />
+        <span className="tracking-tight">{label}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex transition-colors duration-300">
@@ -183,7 +248,9 @@ const App: React.FC = () => {
             <NavItem id="dashboard" icon={LayoutDashboard} label={t('dashboard')} />
             <NavItem id="downloader" icon={Download} label={t('downloader')} />
             <NavItem id="playlists" icon={ListMusic} label={t('playlists')} />
-            <NavItem id="media" icon={Wrench} label={t('media_tools')} />
+            {providerStatus.spotify && <NavItem id="ads" icon={Megaphone} label="Spotify Ads" />}
+            <NavItem id="media" icon={Wrench} label={t('mediaTools')} />
+            <NavItem id="history" icon={History} label={t('history')} />
             <NavItem id="settings" icon={Settings} label={t('settings')} />
           </nav>
         </div>
@@ -234,11 +301,24 @@ const App: React.FC = () => {
           </h2>
           
           {activeTasksCount > 0 && (
-            <div className="flex items-center space-x-2 bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-2xl border border-blue-100 dark:border-blue-800">
-              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-              <span className="text-xs font-black text-blue-600 dark:text-blue-400">
-                {activeTasksCount} {t('active_tasks')}
-              </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleTaskCounterClick}
+                className="flex items-center space-x-2 bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-2xl border border-blue-100 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-95"
+              >
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                <span className="text-xs font-black text-blue-600 dark:text-blue-400">
+                  {activeTasksCount} {t('active_tasks')}
+                </span>
+              </button>
+              
+              <button
+                onClick={handleCancelAll}
+                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                title="Tout annuler"
+              >
+                <XCircle size={18} />
+              </button>
             </div>
           )}
         </header>
@@ -408,37 +488,50 @@ const App: React.FC = () => {
               )}
 
               {activeTab === 'playlists' && <PlaylistExplorer />}
-              
+              {activeTab === 'ads' && <AdsDashboard />}
               {activeTab === 'media' && <MediaTools />}
 
-              {activeTab === 'settings' && (
+              {activeTab === 'history' && (
                 <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
-                  <div className="space-y-8">
-                    <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
-                      <div>
-                        <p className="font-black text-gray-900 dark:text-white">{t('dark_mode')}</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Activer ou désactiver l'interface sombre</p>
-                      </div>
-                      <button 
-                        onClick={() => setDarkMode(!darkMode)}
-                        className={`w-14 h-8 rounded-full transition-all relative ${darkMode ? 'bg-blue-600' : 'bg-gray-300'}`}
-                      >
-                        <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${darkMode ? 'left-7' : 'left-1'}`} />
-                      </button>
-                    </div>
+                  <HistoryView />
+                </div>
+              )}
 
-                    <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
-                      <div>
-                        <p className="font-black text-gray-900 dark:text-white">{t('language')}</p>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Changer la langue de l'interface</p>
+              {activeTab === 'settings' && (
+                <div className="space-y-8">
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
+                    <h3 className="text-xl font-black text-gray-900 dark:text-white tracking-tight mb-6">Préférences</h3>
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
+                        <div>
+                          <p className="font-black text-gray-900 dark:text-white">{t('dark_mode')}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Activer ou désactiver l'interface sombre</p>
+                        </div>
+                        <button 
+                          onClick={() => setDarkMode(!darkMode)}
+                          className={`w-14 h-8 rounded-full transition-all relative ${darkMode ? 'bg-blue-600' : 'bg-gray-300'}`}
+                        >
+                          <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${darkMode ? 'left-7' : 'left-1'}`} />
+                        </button>
                       </div>
-                      <button 
-                        onClick={toggleLanguage}
-                        className="px-6 py-2 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-xl font-black text-sm uppercase shadow-sm"
-                      >
-                        {i18n.language === 'fr' ? 'English' : 'Français'}
-                      </button>
+
+                      <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
+                        <div>
+                          <p className="font-black text-gray-900 dark:text-white">{t('language')}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Changer la langue de l'interface</p>
+                        </div>
+                        <button 
+                          onClick={toggleLanguage}
+                          className="px-6 py-2 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-xl font-black text-sm uppercase shadow-sm"
+                        >
+                          {i18n.language === 'fr' ? 'English' : 'Français'}
+                        </button>
+                      </div>
                     </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
+                    <ProviderManager />
                   </div>
                 </div>
               )}

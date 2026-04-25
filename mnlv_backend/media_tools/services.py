@@ -81,12 +81,20 @@ class MediaService:
                 # Pochette
                 cover_url = metadata.get('cover_url')
                 if cover_url:
-                    r = requests.get(cover_url, timeout=10)
-                    if r.status_code == 200:
-                        audio.tags.add(APIC(
-                            encoding=3, mime='image/jpeg', type=3, 
-                            desc='Front Cover', data=r.content
-                        ))
+                    try:
+                        r = requests.get(cover_url, timeout=10)
+                        if r.status_code == 200:
+                            mime_type = r.headers.get('Content-Type', 'image/jpeg')
+                            audio.tags.add(APIC(
+                                encoding=3, 
+                                mime=mime_type, 
+                                type=3, 
+                                desc='Front Cover', 
+                                data=r.content
+                            ))
+                    except Exception as e:
+                        from core.logger_utils import get_mnlv_logger
+                        get_mnlv_logger("media_service").warning(f"Échec téléchargement pochette : {e}")
                 audio.save()
             else:
                 # Logique MP4
@@ -103,9 +111,12 @@ class MediaService:
                 # Pochette MP4
                 cover_url = metadata.get('cover_url')
                 if cover_url:
-                    r = requests.get(cover_url, timeout=10)
-                    if r.status_code == 200:
-                        video["covr"] = [MP4Cover(r.content, imageformat=MP4Cover.FORMAT_JPEG)]
+                    try:
+                        r = requests.get(cover_url, timeout=10)
+                        if r.status_code == 200:
+                            video["covr"] = [MP4Cover(r.content, imageformat=MP4Cover.FORMAT_JPEG)]
+                    except Exception as e:
+                        pass
                 video.save()
 
         except Exception as e:

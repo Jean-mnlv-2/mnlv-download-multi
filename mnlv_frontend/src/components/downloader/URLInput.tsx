@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useTaskStore } from '../../store/useTaskStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import { LocalFileSystemService } from '../../services/localFileSystem';
 import axios from 'axios';
-import { Search, Download, Music, Video, Loader2, Sparkles, Link as LinkIcon, AlertCircle, ExternalLink, Disc, Radio, Cloud, Youtube, Play as PlayIcon, ShieldCheck, ShieldAlert, History, User } from 'lucide-react';
+import { Search, Download, Music, Video, Loader2, Sparkles, Link as LinkIcon, AlertCircle, ExternalLink, Disc, Radio, Cloud, Youtube, Play as PlayIcon, ShieldCheck, ShieldAlert, History, User, FolderOpen, LayoutGrid, Plus, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import ProviderIcon from './ProviderIcon';
 
 const PROVIDER_CONFIG: { [key: string]: { key: string, label: string, color: string, icon: any } } = {
   'spotify.com': { key: 'spotify', label: 'Spotify', color: 'text-green-500', icon: Disc },
@@ -13,7 +15,9 @@ const PROVIDER_CONFIG: { [key: string]: { key: string, label: string, color: str
   'tidal.com': { key: 'tidal', label: 'Tidal', color: 'text-cyan-400', icon: Disc },
   'soundcloud.com': { key: 'soundcloud', label: 'SoundCloud', color: 'text-orange-500', icon: Cloud },
   'amazon.com': { key: 'amazon_music', label: 'Amazon Music', color: 'text-blue-400', icon: Disc },
-  'music.youtube.com': { key: 'youtube_music', label: 'YouTube Music', color: 'text-red-600', icon: Youtube }
+  'music.youtube.com': { key: 'youtube_music', label: 'YouTube Music', color: 'text-red-600', icon: Youtube },
+  'boomplay.com': { key: 'boomplay', label: 'Boomplay', color: 'text-blue-500', icon: Music },
+  'boomplaymusic.com': { key: 'boomplay', label: 'Boomplay', color: 'text-blue-500', icon: Music }
 };
 
 const URLInput: React.FC = () => {
@@ -28,9 +32,29 @@ const URLInput: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [downloadTarget, setDownloadTarget] = useState<'local' | 'playlist'>('local');
+  const [selectedTargetPlaylist, setSelectedTargetPlaylist] = useState<string | null>(null);
+  const [showNewPlaylistInput, setShowNewPlaylistInput] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const searchRef = useRef<HTMLDivElement>(null);
-  const { addTask, pollTaskStatus, addNotification } = useTaskStore();
-  const { providerStatus } = useAuthStore();
+  const { addTask, pollTaskStatus, addNotification, triggerRefresh, setStagedTracks, localDirectorySelected, setLocalDirectorySelected } = useTaskStore();
+  const { providerStatus, accessToken } = useAuthStore();
+
+  const handleSelectLocalDir = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setDownloadTarget('local');
+    
+    try {
+      const success = await LocalFileSystemService.selectDirectory();
+      if (success) {
+        setLocalDirectorySelected(true);
+        addNotification('success', "Dossier local configuré !");
+      }
+    } catch (err) {}
+  };
 
   const AUDIO_FORMATS = [
     { value: 'AUDIO', label: 'MP3', desc: 'Standard (320kbps)' },
@@ -61,17 +85,17 @@ const URLInput: React.FC = () => {
           setSearchResults(response.data);
           setShowResults(true);
         } catch (error) {
-          console.error("Search error:", error);
         } finally {
           setIsSearching(false);
         }
       } else {
+        setSearchResults(null);
         setShowResults(false);
       }
     }, 500);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [url, isUrl]);
+  }, [url, isUrl, explicitFilter]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -98,6 +122,42 @@ const URLInput: React.FC = () => {
     return null;
   }, [detectedProvider, providerStatus]);
 
+  useEffect(() => {
+    if (downloadTarget === 'playlist' && detectedProvider && accessToken) {
+      fetchUserPlaylists(detectedProvider.key);
+    }
+  }, [downloadTarget, detectedProvider, accessToken]);
+
+  const handleCreateAndSelectPlaylist = async () => {
+    if (!newPlaylistName.trim() || !detectedProvider) return;
+    try {
+      const res = await axios.post('/api/playlist/manage/', {
+        action: 'CREATE',
+        provider: detectedProvider.key,
+        provider_url: `https://${detectedProvider.key === 'apple_music' ? 'music.apple' : detectedProvider.key}.com`,
+        name: newPlaylistName
+      });
+      addNotification('success', `Playlist "${newPlaylistName}" créée !`);
+      await fetchUserPlaylists(detectedProvider.key);
+      setSelectedTargetPlaylist(res.data.playlist_id);
+      setShowNewPlaylistInput(false);
+      setNewPlaylistName('');
+    } catch (err) {
+      addNotification('error', "Erreur lors de la création");
+    }
+  };
+
+  const fetchUserPlaylists = async (provider: string) => {
+    try {
+      const res = await axios.post('/api/playlist/manage/', {
+        action: 'GET_LIST', 
+        provider: provider,
+        provider_url: `https://${provider === 'apple_music' ? 'music.apple' : provider}.com`
+      });
+      setUserPlaylists(res.data.playlists || []);
+    } catch (err) {}
+  };
+
   const handleConnectProvider = async (provider: string) => {
     try {
       const response = await axios.get(`/api/auth/providers/${provider}/login/`);
@@ -110,44 +170,88 @@ const URLInput: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!url) return;
+
+    if (downloadTarget === 'playlist' && !selectedTargetPlaylist) {
+      addNotification('error', "Veuillez choisir une playlist de destination");
+      return;
+    }
 
     setLoading(true);
     try {
+      // Si on est en local et qu'aucun dossier n'est sélectionné, on demande d'abord
+      if (downloadTarget === 'local' && !LocalFileSystemService.getHandle()) {
+        const success = await LocalFileSystemService.selectDirectory();
+        if (!success) {
+          setLoading(false);
+          return;
+        }
+        setLocalDirectorySelected(true);
+      }
+
       const response = await axios.post('/api/download/', { 
         url,
         media_type: mediaType,
+        quality,
         prefer_video: preferVideoIfAvailable,
         explicit_filter: explicitFilter
       });
       const data = response.data;
 
-      if (data.type === 'playlist') {
+      if (data.type === 'staged_playlist') {
+        addNotification('success', data.message);
+        if (data.tracks) {
+          const saveDir = downloadTarget === 'local' ? data.message.split(' : ')[1] || 'MNLV_Playlist' : undefined;
+          
+          setStagedTracks(data.tracks.map((t: any) => ({
+            ...t,
+            save_to_dir: saveDir
+          })));
+        }
+        triggerRefresh();
+        setUrl('');
+      } else if (data.type === 'playlist') {
+        const saveDir = downloadTarget === 'local' ? data.title || 'MNLV_Playlist' : undefined;
+        
         data.tasks.forEach((t: any) => {
           addTask({ 
             id: t.task_id, 
             status: 'PENDING', 
             progress: 0, 
             original_url: url, 
-            provider: t.provider || detectedProvider?.key || 'URL'
-            });
+            provider: t.provider || detectedProvider?.key || 'URL',
+            save_to_dir: saveDir
+          });
           pollTaskStatus(t.task_id);
         });
         addNotification('success', `${data.tasks.length} ${t('processing')}`);
+        setUrl('');
       } else {
+        // Single track handling
+        if (downloadTarget === 'playlist' && selectedTargetPlaylist) {
+          await axios.post('/api/playlist/manage/', {
+            action: 'ADD_TRACKS',
+            playlist_id: selectedTargetPlaylist,
+            track_urls: [url],
+            provider_url: `https://${detectedProvider?.key || 'spotify'}.com`
+          });
+          addNotification('success', "Titre ajouté à votre playlist !");
+        }
+
         addTask({ 
           id: data.task_id, 
           status: 'PENDING', 
           progress: 0, 
           original_url: url, 
-          provider: data.provider || detectedProvider?.key || 'URL'
+          provider: data.provider || detectedProvider?.key || 'URL',
+          save_to_dir: downloadTarget === 'local' ? 'MNLV_Downloads' : undefined
         });
         pollTaskStatus(data.task_id);
         addNotification('info', t('processing'));
+        setUrl('');
       }
-      setUrl('');
     } catch (error: any) {
       addNotification('error', error.response?.data?.error || t('failed'));
     } finally {
@@ -158,6 +262,7 @@ const URLInput: React.FC = () => {
   const ProviderIcon = detectedProvider?.icon || (isUrl ? LinkIcon : Search);
 
   const isSoundCloud = detectedProvider?.key === 'soundcloud';
+  const isAudiobook = isUrl && (url.includes('/audiobook/') || url.includes('/chapter/'));
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6" ref={searchRef}>
@@ -172,6 +277,19 @@ const URLInput: React.FC = () => {
             <div className="px-4 py-1.5 bg-orange-500/10 border border-orange-500/20 rounded-full flex items-center gap-2">
               <Sparkles size={12} className="text-orange-500" />
               <span className="text-[10px] font-black text-orange-600 uppercase tracking-tighter">Mode SoundCloud HD activé</span>
+            </div>
+          </motion.div>
+        )}
+        {isAudiobook && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="flex justify-center"
+          >
+            <div className="px-4 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center gap-2">
+              <Sparkles size={12} className="text-blue-500" />
+              <span className="text-[10px] font-black text-blue-600 uppercase tracking-tighter">Mode Livre Audio Détecté</span>
             </div>
           </motion.div>
         )}
@@ -209,26 +327,34 @@ const URLInput: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <form onSubmit={handleSubmit} className="relative">
-        <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none transition-all duration-500">
-          <motion.div
-            key={detectedProvider?.key || 'default'}
-            initial={{ scale: 0.5, opacity: 0, rotate: -45 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            className={`${detectedProvider?.color || 'text-gray-400'}`}
-          >
-            <ProviderIcon size={24} strokeWidth={2.5} />
-          </motion.div>
+      <form onSubmit={handleSubmit} className="relative bg-white dark:bg-slate-900 border-2 border-transparent dark:border-slate-800 rounded-[2.5rem] shadow-2xl shadow-gray-200/40 dark:shadow-none overflow-hidden focus-within:border-blue-500 focus-within:ring-[12px] focus-within:ring-blue-500/5 transition-all">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none transition-all duration-500">
+            <motion.div
+              key={detectedProvider?.key || 'default'}
+              initial={{ scale: 0.5, opacity: 0, rotate: -45 }}
+              animate={{ scale: 1, opacity: 1, rotate: 0 }}
+              className={`${detectedProvider?.color || 'text-gray-400'}`}
+            >
+              {detectedProvider ? (
+                <ProviderIcon provider={detectedProvider.key} size={24} />
+              ) : isUrl ? (
+                <LinkIcon size={24} strokeWidth={2.5} />
+              ) : (
+                <Search size={24} strokeWidth={2.5} />
+              )}
+            </motion.div>
+          </div>
+          
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onFocus={() => url && !isUrl && setShowResults(true)}
+            placeholder={t('search_placeholder')}
+            className="w-full pl-16 pr-44 py-7 bg-transparent outline-none font-bold text-gray-700 dark:text-white text-lg placeholder:text-gray-300 dark:placeholder:text-gray-600"
+          />
         </div>
-        
-        <input
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onFocus={() => url && !isUrl && setShowResults(true)}
-          placeholder={t('search_placeholder')}
-          className="w-full pl-16 pr-44 py-7 bg-white dark:bg-slate-900 border-2 border-transparent dark:border-slate-800 rounded-[2.5rem] shadow-2xl shadow-gray-200/40 dark:shadow-none focus:bg-white dark:focus:bg-slate-900 focus:border-blue-500 focus:ring-[12px] focus:ring-blue-500/5 outline-none transition-all font-bold text-gray-700 dark:text-white text-lg placeholder:text-gray-300 dark:placeholder:text-gray-600"
-        />
 
         {/* Search Results Dropdown */}
         <AnimatePresence>
@@ -400,11 +526,141 @@ const URLInput: React.FC = () => {
             {loading ? (
               <Loader2 className="animate-spin" size={20} />
             ) : (
-              <Download size={20} className="group-hover/btn:translate-y-0.5 transition-transform" />
+              <Download size="20" className="group-hover/btn:translate-y-0.5 transition-transform" />
             )}
             <span className="hidden sm:inline uppercase tracking-tighter">{t('download')}</span>
           </button>
         </div>
+
+        <AnimatePresence>
+          {showAdvanced && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="p-4 pt-0 border-t border-gray-100 dark:border-slate-800 space-y-4"
+            >
+              {/* Destination Toggle */}
+              <div className="flex items-center gap-4 p-2 bg-gray-50/50 dark:bg-slate-800/50 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setDownloadTarget('local')}
+                  className={`flex-1 py-3 px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                    downloadTarget === 'local' 
+                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' 
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  <FolderOpen size={14} /> Local
+                  {localDirectorySelected && <Check size={12} className="text-green-500" />}
+                </button>
+                <button
+                  type="button"
+                  disabled={!accessToken}
+                  onClick={() => setDownloadTarget('playlist')}
+                  className={`flex-1 py-3 px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                    downloadTarget === 'playlist' 
+                      ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm' 
+                      : 'text-gray-400 hover:text-gray-600'
+                  } ${!accessToken ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <LayoutGrid size={14} /> Playlist
+                </button>
+              </div>
+
+              {/* Local Directory Selector */}
+              {downloadTarget === 'local' && (
+                <div className="px-2 py-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectLocalDir}
+                    className={`w-full py-4 px-6 rounded-2xl border-2 border-dashed flex items-center justify-center gap-4 transition-all cursor-pointer shadow-sm hover:shadow-md ${
+                      localDirectorySelected 
+                        ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-900/20 dark:border-green-800' 
+                        : 'bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-xl ${localDirectorySelected ? 'bg-green-500 text-white' : 'bg-blue-500 text-white'}`}>
+                      <FolderOpen size={20} />
+                    </div>
+                    <div className="text-left">
+                      <span className="text-xs font-black uppercase tracking-widest block">
+                        {localDirectorySelected ? 'Dossier configuré' : 'Choisir un dossier de destination'}
+                      </span>
+                      <span className="text-[10px] font-bold opacity-60 block">
+                        {localDirectorySelected ? 'Cliquez pour changer l\'emplacement' : 'Emplacement local sur votre appareil'}
+                      </span>
+                    </div>
+                  </button>
+                  {localDirectorySelected && (
+                    <motion.p 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-[9px] text-green-600 font-black mt-3 text-center uppercase tracking-[0.1em]"
+                    >
+                      <Check size={10} className="inline mr-1" />
+                      Enregistrement automatique activé
+                    </motion.p>
+                  )}
+                </div>
+              )}
+
+              {/* Playlist Selector */}
+              {downloadTarget === 'playlist' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-2"
+                >
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Playlist de destination</label>
+                    <button 
+                      type="button"
+                      onClick={() => setShowNewPlaylistInput(!showNewPlaylistInput)}
+                      className="text-[9px] font-black text-emerald-500 hover:underline flex items-center gap-1"
+                    >
+                      <Plus size={10} /> {showNewPlaylistInput ? 'Annuler' : 'Nouvelle'}
+                    </button>
+                  </div>
+
+                  {showNewPlaylistInput ? (
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        value={newPlaylistName}
+                        onChange={(e) => setNewPlaylistName(e.target.value)}
+                        placeholder="Nom..."
+                        className="flex-1 bg-white dark:bg-slate-800 border border-emerald-100 dark:border-emerald-900/30 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-emerald-500 transition-all text-gray-700 dark:text-white"
+                      />
+                      <button 
+                        type="button"
+                        onClick={handleCreateAndSelectPlaylist}
+                        disabled={!newPlaylistName.trim()}
+                        className="px-4 py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase hover:bg-emerald-600 transition-all"
+                      >
+                        Créer
+                      </button>
+                    </div>
+                  ) : (
+                    <select 
+                      value={selectedTargetPlaylist || ''}
+                      onChange={(e) => setSelectedTargetPlaylist(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:border-emerald-500 transition-all text-gray-700 dark:text-white"
+                    >
+                      <option value="">Sélectionner une playlist...</option>
+                      {userPlaylists.map(pl => (
+                        <option key={pl.id} value={pl.id}>{pl.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {!accessToken && (
+                    <p className="text-[9px] text-orange-500 font-bold uppercase text-center">Connexion requise pour les playlists</p>
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </form>
 
       {/* Quick Access Tips */}

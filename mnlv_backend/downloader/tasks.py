@@ -49,12 +49,28 @@ def process_playlist_item(self, task_id: str):
 def cleanup_old_files():
     """
     Tâche périodique pour nettoyer les fichiers temporaires et les anciens téléchargements.
-    Améliorée pour être plus performante et sélective.
+    Améliorée pour inclure le monitoring de l'espace disque.
     """
+    usage = shutil.disk_usage(settings.MEDIA_ROOT)
+    free_gb = usage.free / (1024**3)
+    percent_free = (usage.free / usage.total) * 100
+    
+    if percent_free < 10 or free_gb < 2:
+        logger.warning(f"ESPACE DISQUE CRITIQUE : {free_gb:.2f} GB libres ({percent_free:.1f}%)")
+        is_critical = True
+    else:
+        is_critical = False
+
     now = timezone.now()
     audio_ttl = timedelta(minutes=int(os.getenv("FILE_CLEANUP_MINUTES", "30")))
     video_ttl = timedelta(minutes=int(os.getenv("VIDEO_FILE_CLEANUP_MINUTES", "15")))
     tmp_ttl = timedelta(minutes=int(os.getenv("TMP_CLEANUP_MINUTES", "60")))
+    
+    if is_critical:
+        audio_ttl = audio_ttl / 2
+        video_ttl = video_ttl / 2
+        tmp_ttl = tmp_ttl / 2
+        logger.info("Nettoyage agressif activé suite à manque d'espace disque.")
     
     tmp_root = Path(settings.MEDIA_ROOT) / "tmp"
     if tmp_root.exists():

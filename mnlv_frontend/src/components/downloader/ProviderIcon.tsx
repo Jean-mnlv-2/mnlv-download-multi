@@ -1,49 +1,36 @@
 import React from 'react';
 
-// Importation des assets
-import spotifyIcon from '../../assets/icons-providers/spotify.png';
-import appleMusicIcon from '../../assets/icons-providers/applemusic.png';
-import deezerIcon from '../../assets/icons-providers/deezer.png';
-import soundcloudIcon from '../../assets/icons-providers/soundcloud.png';
-import tidalIcon from '../../assets/icons-providers/tidal.png';
-import amazonMusicIcon from '../../assets/icons-providers/amazonmusic.png';
-import youtubeMusicIcon from '../../assets/icons-providers/youtubemusic.png';
-
-export type ProviderType = 'spotify' | 'apple_music' | 'deezer' | 'soundcloud' | 'tidal' | 'amazon_music' | 'youtube_music' | string;
-
 interface ProviderIconProps {
-  provider: ProviderType | null;
+  provider: string | null | undefined;
   className?: string;
   size?: number;
 }
 
-const providerMap: Record<string, string> = {
-  'spotify': spotifyIcon,
-  'apple_music': appleMusicIcon,
-  'apple': appleMusicIcon,
-  'deezer': deezerIcon,
-  'soundcloud': soundcloudIcon,
-  'tidal': tidalIcon,
-  'amazon_music': amazonMusicIcon,
-  'amazon': amazonMusicIcon,
-  'youtube_music': youtubeMusicIcon,
-  'youtube': youtubeMusicIcon,
-};
+const ProviderIcon: React.FC<ProviderIconProps> = ({ provider, className = "", size = 16 }) => {
+  const getIconPath = (name: string) => {
+    const iconName = name.toLowerCase().replace(/_|\s/g, '');
+    return `/src/assets/icons-providers/${iconName}.png`;
+  };
 
-const ProviderIcon: React.FC<ProviderIconProps> = ({ provider, className = '', size = 20 }) => {
-  if (!provider) return null;
-
-  const normalizedProvider = provider.toLowerCase().replace(/\s/g, '_');
-  const iconSrc = providerMap[normalizedProvider] || null;
-
-  if (!iconSrc) {
+  if (!provider || provider === 'unknown') {
     return null;
+  }
+
+  let normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === 'youtube_music' || normalizedProvider === 'youtubemusic') {
+    normalizedProvider = 'youtubemusic';
+  } else if (normalizedProvider === 'amazon_music' || normalizedProvider === 'amazonmusic') {
+    normalizedProvider = 'amazonmusic';
+  } else if (normalizedProvider === 'apple_music' || normalizedProvider === 'applemusic') {
+    normalizedProvider = 'applemusic';
+  } else if (normalizedProvider === 'boomplay' || normalizedProvider === 'boomplaymusic') {
+    normalizedProvider = 'boomplay';
   }
 
   return (
     <img 
-      src={iconSrc} 
-      alt={provider} 
+      src={getIconPath(normalizedProvider)} 
+      alt={provider}
       className={`inline-block object-contain ${className}`}
       style={{ width: size, height: size }}
       onError={(e) => {

@@ -28,17 +28,23 @@ class AppleMusicProvider(MusicProvider):
                 raise ImportError("applemusicpy n'est pas installé.")
             
             secret_key = settings.APPLE_MUSIC_SECRET_KEY
-            if secret_key and isinstance(secret_key, str):
-                if "\\n" in secret_key:
-                    secret_key = secret_key.replace("\\n", "\n")
-                if "-----BEGIN PRIVATE KEY-----" not in secret_key:
-                    secret_key = f"-----BEGIN PRIVATE KEY-----\n{secret_key}\n-----END PRIVATE KEY-----"
+            if not secret_key:
+                raise ValueError("APPLE_MUSIC_SECRET_KEY non configuré.")
             
-            self._am = AppleMusic(
-                secret_key=secret_key,
-                key_id=settings.APPLE_MUSIC_KEY_ID,
-                team_id=settings.APPLE_MUSIC_TEAM_ID
-            )
+            if isinstance(secret_key, str):
+                secret_key = secret_key.replace("\\n", "\n")
+                secret_key = secret_key.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").strip()
+                secret_key = f"-----BEGIN PRIVATE KEY-----\n{secret_key}\n-----END PRIVATE KEY-----"
+            
+            try:
+                self._am = AppleMusic(
+                    secret_key=secret_key,
+                    key_id=settings.APPLE_MUSIC_KEY_ID,
+                    team_id=settings.APPLE_MUSIC_TEAM_ID
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize AppleMusic client: {e}")
+                raise
         return self._am
 
     def _get_headers(self) -> dict:
@@ -75,7 +81,7 @@ class AppleMusicProvider(MusicProvider):
 
     def supports_url(self, url: str) -> bool:
         """Vérifie si l'URL est de type music.apple.com"""
-        return bool(re.search(r"music\.apple\.com/.*?/(album|song|playlist)/", url))
+        return bool(re.search(r"music\.apple\.com", url))
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un clip Apple Music avec 'extend' pour plus de détails"""
         try:

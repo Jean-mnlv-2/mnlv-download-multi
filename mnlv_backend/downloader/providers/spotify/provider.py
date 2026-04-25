@@ -1,9 +1,12 @@
 from ..base import MusicProvider, TrackMetadata
 import re
 import spotipy
+import logging
 from spotipy.oauth2 import SpotifyClientCredentials
 from django.conf import settings
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 class SpotifyProvider(MusicProvider):
     """
@@ -77,12 +80,46 @@ class SpotifyProvider(MusicProvider):
                     'owner': item['owner']['display_name'],
                     'url': item['external_urls']['spotify'],
                     'cover_url': item['images'][0]['url'] if item['images'] else None,
+                    'type': 'playlist'
                 })
             if results['next']:
                 results = self.client.next(results)
             else:
                 results = None
         return playlists
+
+    def get_user_audiobooks(self) -> List[dict]:
+        """Récupère tous les livres audio sauvegardés par l'utilisateur"""
+        audiobooks = []
+        try:
+            results = self.client.current_user_saved_audiobooks()
+            while results:
+                for item in results['items']:
+                    ab = item
+                    audiobooks.append({
+                        'id': ab['id'],
+                        'name': ab['name'],
+                        'track_count': ab['total_chapters'],
+                        'owner': ", ".join([a['name'] for a in ab['authors']]),
+                        'url': ab['external_urls']['spotify'],
+                        'cover_url': ab['images'][0]['url'] if ab['images'] else None,
+                        'type': 'audiobook'
+                    })
+                if results['next']:
+                    results = self.client.next(results)
+                else:
+                    results = None
+        except Exception as e:
+            logger.warning(f"Impossible de récupérer les livres audio : {e}")
+        return audiobooks
+
+    def save_audiobook(self, audiobook_id: str):
+        """Enregistre un livre audio dans la bibliothèque de l'utilisateur"""
+        self.client.current_user_saved_audiobooks_add([audiobook_id])
+
+    def remove_audiobook(self, audiobook_id: str):
+        """Retire un livre audio de la bibliothèque de l'utilisateur"""
+        self.client.current_user_saved_audiobooks_delete([audiobook_id])
 
     def get_playlist_details(self, url: str) -> dict:
         """Détails complets et statistiques d'une playlist Spotify avec pagination pour la durée"""
@@ -112,25 +149,35 @@ class SpotifyProvider(MusicProvider):
         }
 
     def supports_url(self, url: str) -> bool:
-        """Vérifie si l'URL est de type spotify.com (supporte les URLs internationales intl-xx)"""
-        return bool(re.search(r"open\.spotify\.com/(?:[a-z]{2,3}-[a-z]{2,3}/)?(track|album|playlist|episode|artist|show)/", url))
+        """Vérifie si l'URL est une URL Spotify valide"""
+        return bool(re.search(r"(open|play|www)?\.?spotify\.com", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
-        """Extrait les métadonnées d'un titre ou d'un épisode Spotify"""
-        if "/episode/" in url:
-            episode = self.client.episode(url)
-            return self._map_episode(episode)
+        """Extrait les métadonnées d'un titre, d'un épisode ou d'un chapitre Spotify"""
+        market = getattr(settings, 'SPOTIFY_MARKET', 'FR')
         
-        track = self.client.track(url)
+        if "/episode/" in url:
+            episode = self.client.episode(url, market=market)
+            return self._map_episode(episode)
+        elif "/chapter/" in url:
+            chapter = self.client.chapter(url, market=market)
+            return self._map_chapter(chapter)
+        elif "/audiobook/" in url:
+            audiobook = self.client.audiobook(url, market=market)
+            return self._map_audiobook(audiobook)
+        
+        track = self.client.track(url, market=market)
         return self._map_track(track)
 
     def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
-        """Extrait la liste des titres d'une playlist ou d'un album avec pagination complète"""
+        """Extrait la liste des titres d'une playlist, album, show ou livre audio"""
         tracks = []
+        market = getattr(settings, 'SPOTIFY_MARKET', 'FR')
+        
         try:
             if "/playlist/" in url:
                 fields = 'items(track(name,artists,album(name,release_date,images),duration_ms,external_ids,external_urls,explicit,type)),next'
-                results = self.client.playlist_tracks(url, fields=fields, additional_types=('track', 'episode'))
+                results = self.client.playlist_tracks(url, fields=fields, market=market, additional_types=('track', 'episode'))
                 items = results['items']
                 while results['next']:
                     results = self.client.next(results)
@@ -145,9 +192,9 @@ class SpotifyProvider(MusicProvider):
                             tracks.append(self._map_track(t))
             
             elif "/album/" in url:
-                results = self.client.album_tracks(url)
+                results = self.client.album_tracks(url, market=market)
                 items = results['items']
-                album_info = self.client.album(url)
+                album_info = self.client.album(url, market=market)
                 while results['next']:
                     results = self.client.next(results)
                     items.extend(results['items'])
@@ -158,18 +205,31 @@ class SpotifyProvider(MusicProvider):
                     tracks.append(self._map_track(item))
             
             elif "/artist/" in url:
-                results = self.client.artist_top_tracks(url)
+                results = self.client.artist_top_tracks(url, market=market)
                 for track in results['tracks']:
                     tracks.append(self._map_track(track))
             
             elif "/show/" in url:
-                results = self.client.show_episodes(url)
+                results = self.client.show_episodes(url, market=market)
                 items = results['items']
                 while results['next']:
                     results = self.client.next(results)
                     items.extend(results['items'])
                 for ep in items:
                     tracks.append(self._map_episode(ep))
+
+            elif "/audiobook/" in url:
+                results = self.client.audiobook_chapters(url, market=market)
+                items = results['items']
+                audiobook_info = self.client.audiobook(url, market=market)
+                while results['next']:
+                    results = self.client.next(results)
+                    items.extend(results['items'])
+                
+                for item in items:
+                    # Inject audiobook info for mapping
+                    item['audiobook'] = audiobook_info
+                    tracks.append(self._map_chapter(item))
                     
         except spotipy.SpotifyException as e:
             raise ValueError(f"Erreur API Spotify (Code {e.http_status}) : {e.msg}")
@@ -217,4 +277,61 @@ class SpotifyProvider(MusicProvider):
             is_episode=True,
             provider="spotify",
             original_url=ep.get('external_urls', {}).get('spotify')
+        )
+
+    def _map_audiobook(self, ab: dict) -> TrackMetadata:
+        """Mappe un livre audio vers TrackMetadata (en tant qu'entité unique)"""
+        images = ab.get('images', [])
+        cover_url = images[0]['url'] if images else None
+        
+        authors = [a['name'] for a in ab.get('authors', [])]
+        narrators = [n['name'] for n in ab.get('narrators', [])]
+        artist_parts = authors + ([f"Lu par {', '.join(narrators)}"] if narrators else [])
+        artist = " & ".join(artist_parts)
+        
+        edition = ab.get('edition')
+        title = f"{ab['name']} ({edition})" if edition else ab['name']
+        
+        return TrackMetadata(
+            title=title,
+            artist=artist,
+            album=ab['name'],
+            release_year=None,
+            cover_url=cover_url,
+            duration_ms=None,
+            explicit=ab.get('explicit', False),
+            is_episode=True,
+            provider="spotify",
+            original_url=ab.get('external_urls', {}).get('spotify')
+        )
+
+    def _map_chapter(self, ch: dict) -> TrackMetadata:
+        """Mappe un chapitre de livre audio vers TrackMetadata"""
+        images = ch.get('images', [])
+        cover_url = images[0]['url'] if images else None
+        
+        # Récupération des infos depuis l'audiobook parent si injecté
+        audiobook = ch.get('audiobook', {})
+        authors = [a['name'] for a in audiobook.get('authors', [])]
+        narrators = [n['name'] for n in audiobook.get('narrators', [])]
+        
+        artist_parts = authors + ([f"Lu par {', '.join(narrators)}"] if narrators else [])
+        artist = " & ".join(artist_parts) if artist_parts else "Auteur Inconnu"
+        
+        album = audiobook.get('name', 'Livre Audio')
+        edition = audiobook.get('edition')
+        if edition:
+            album = f"{album} ({edition})"
+
+        return TrackMetadata(
+            title=ch['name'],
+            artist=artist,
+            album=album,
+            release_year=int(ch.get('release_date', '0')[:4]) if ch.get('release_date') else None,
+            cover_url=cover_url,
+            duration_ms=ch.get('duration_ms'),
+            explicit=ch.get('explicit', False),
+            is_episode=True,
+            provider="spotify",
+            original_url=ch.get('external_urls', {}).get('spotify')
         )

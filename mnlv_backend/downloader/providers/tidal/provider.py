@@ -66,7 +66,7 @@ class TidalProvider(MusicProvider):
 
     def supports_url(self, url: str) -> bool:
         """Vérifie si l'URL est de type tidal.com"""
-        return bool(re.search(r"tidal\.com/.*?/(track|album|playlist)/", url))
+        return bool(re.search(r"tidal\.com", url))
 
     def get_track_info(self, url: str) -> TrackMetadata:
         """Extrait les métadonnées d'un titre Tidal"""

@@ -12,12 +12,17 @@ import {
   Library,
   ArrowUp,
   ArrowDown,
-  Trash2
+  Trash2,
+  RefreshCw,
+  X,
+  BookOpen,
+  Book
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useTaskStore } from '../../store/useTaskStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import ProviderIcon from './ProviderIcon';
 
 interface Playlist {
   id: string;
@@ -29,6 +34,7 @@ interface Playlist {
   snapshot_id?: string;
   isSpecial?: boolean;
   tracks?: any[];
+  type?: 'playlist' | 'audiobook';
 }
 
 interface Provider {
@@ -43,6 +49,7 @@ interface Provider {
 const PlaylistExplorer: React.FC = () => {
   const { t } = useTranslation();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [activeTab, setActiveTab] = useState<'playlists' | 'audiobooks'>('playlists');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { addNotification, addTask, pollTaskStatus } = useTaskStore();
@@ -53,11 +60,19 @@ const PlaylistExplorer: React.FC = () => {
     { id: 'deezer', name: 'Deezer', color: 'bg-purple-600', icon: Library, loginUrl: '/api/auth/providers/deezer/login/' },
     { id: 'apple_music', name: 'Apple Music', color: 'bg-rose-600', icon: Music, loginUrl: '/api/auth/providers/apple-music/login/' },
     { id: 'soundcloud', name: 'SoundCloud', color: 'bg-orange-600', icon: Music, loginUrl: '/api/auth/providers/soundcloud/login/' },
+    { id: 'tidal', name: 'Tidal', color: 'bg-slate-900', icon: Music, loginUrl: '/api/auth/providers/tidal/login/' },
+    { id: 'amazon_music', name: 'Amazon Music', color: 'bg-blue-400', icon: Music, loginUrl: '/api/auth/providers/amazon-music/login/' },
+    { id: 'youtube_music', name: 'YouTube Music', color: 'bg-red-600', icon: Music, isPublic: true },
+    { id: 'boomplay', name: 'Boomplay', color: 'bg-blue-600', icon: Music, isPublic: true },
   ];
 
   const [connectionStatus, setConnectionStatus] = useState<Record<string, boolean>>({});
   const [activeProvider, setActiveTabProvider] = useState('spotify');
   const [activeView, setActiveView] = useState<'playlists' | 'likes' | 'stream'>('playlists');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [newPlaylistDescription, setNewPlaylistDescription] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const checkConnection = async () => {
@@ -122,10 +137,16 @@ const PlaylistExplorer: React.FC = () => {
   };
 
   useEffect(() => {
-    if (connectionStatus[activeProvider]) {
-      fetchContent(activeView);
+    setActiveTab('playlists');
+    fetchContent();
+  }, [activeProvider]);
+
+  useEffect(() => {
+    const hasAudiobooks = playlists.some(item => item.type === 'audiobook');
+    if (activeTab === 'audiobooks' && !loading && !hasAudiobooks) {
+      setActiveTab('playlists');
     }
-  }, [activeProvider, activeView, connectionStatus]);
+  }, [playlists, loading, activeTab]);
 
   const handleConnect = async (providerId: string) => {
     if (providerId === 'apple_music') {
@@ -160,7 +181,6 @@ const PlaylistExplorer: React.FC = () => {
         setConnectionStatus(prev => ({ ...prev, apple_music: true }));
         setActiveTabProvider('apple_music');
       } catch (err: any) {
-        console.error("Apple Music Error:", err);
         addNotification('error', "Échec de la connexion Apple Music");
       }
       return;
@@ -247,6 +267,49 @@ const PlaylistExplorer: React.FC = () => {
     }
   };
 
+  const handleCreatePlaylist = async () => {
+    if (!newPlaylistName.trim()) {
+      addNotification('error', 'Le nom de la playlist est requis');
+      return;
+    }
+    setCreating(true);
+    try {
+      await axios.post('/api/playlist/manage/', {
+        action: 'CREATE',
+        provider: activeProvider,
+        provider_url: `https://${activeProvider === 'apple_music' ? 'music.apple' : activeProvider}.com`,
+        name: newPlaylistName,
+        description: newPlaylistDescription
+      });
+      addNotification('success', 'Playlist créée avec succès');
+      setShowCreateModal(false);
+      setNewPlaylistName('');
+      setNewPlaylistDescription('');
+      fetchContent();
+    } catch (err: any) {
+      addNotification('error', err.response?.data?.error || 'Erreur lors de la création');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDeletePlaylist = async (playlist: Playlist) => {
+    if (!window.confirm(`Voulez-vous vraiment supprimer la playlist "${playlist.name}" ?`)) return;
+    
+    try {
+      await axios.post('/api/playlist/manage/', {
+        action: 'DELETE',
+        provider: activeProvider,
+        provider_url: playlist.url || `https://${activeProvider === 'apple_music' ? 'music.apple' : activeProvider}.com`,
+        playlist_id: playlist.id
+      });
+      addNotification('success', 'Playlist supprimée');
+      fetchContent();
+    } catch (err: any) {
+      addNotification('error', 'Erreur lors de la suppression');
+    }
+  };
+
   const handleReorder = async (playlist: Playlist, rangeStart: number, insertBefore: number) => {
     try {
       const response = await axios.post('/api/playlist/manage/', {
@@ -268,6 +331,12 @@ const PlaylistExplorer: React.FC = () => {
     }
   };
 
+  const filteredItems = playlists.filter(item => {
+    if (activeTab === 'audiobooks') return item.type === 'audiobook';
+    return !item.type || item.type === 'playlist';
+  });
+
+  const hasAudiobooks = playlists.some(item => item.type === 'audiobook');
   const isAnyConnected = Object.values(connectionStatus).some(status => status);
 
   if (!isAnyConnected) {
@@ -289,8 +358,8 @@ const PlaylistExplorer: React.FC = () => {
                 onClick={() => handleConnect(p.id)}
                 className={`group relative overflow-hidden p-8 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 transition-all hover:shadow-2xl active:scale-95 flex flex-col items-center gap-4 bg-white dark:bg-slate-900`}
               >
-                <div className={`w-14 h-14 ${p.color} text-white rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110`}>
-                  <p.icon size={28} />
+                <div className={`w-14 h-14 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 border border-gray-100 dark:border-slate-700`}>
+                  <ProviderIcon provider={p.id} size={32} />
                 </div>
                 <div>
                   <p className="font-black text-gray-900 dark:text-white text-sm">{p.isPublic ? 'Explorer' : 'Connecter'}</p>
@@ -307,12 +376,41 @@ const PlaylistExplorer: React.FC = () => {
   return (
     <div className="w-full max-w-6xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
-        <div className="space-y-1">
+        <div className="space-y-4">
           <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-black text-xs uppercase tracking-widest">
             <Library size={14} />
-            <span>Votre Bibliothèque</span>
+            <span>Votre Bibliothèque {activeProvider === 'spotify' ? '(Spotify Full Access)' : ''}</span>
           </div>
-          <h2 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Mes Playlists</h2>
+          
+          <div className="flex items-center gap-8 relative pb-2">
+            <button 
+              onClick={() => setActiveTab('playlists')}
+              className={`relative text-3xl font-black tracking-tight transition-all ${activeTab === 'playlists' ? 'text-gray-900 dark:text-white' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400'}`}
+            >
+              Mes Playlists
+              {activeTab === 'playlists' && (
+                <motion.div 
+                  layoutId="activeTabUnderline"
+                  className="absolute -bottom-2 left-0 right-0 h-1 bg-emerald-500 rounded-full"
+                />
+              )}
+            </button>
+            
+            {hasAudiobooks && (
+              <button 
+                onClick={() => setActiveTab('audiobooks')}
+                className={`relative text-3xl font-black tracking-tight transition-all ${activeTab === 'audiobooks' ? 'text-gray-900 dark:text-white' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400'}`}
+              >
+                Livres Audio
+                {activeTab === 'audiobooks' && (
+                  <motion.div 
+                    layoutId="activeTabUnderline"
+                    className="absolute -bottom-2 left-0 right-0 h-1 bg-blue-500 rounded-full"
+                  />
+                )}
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {connectionStatus.deezer && (
@@ -335,33 +433,33 @@ const PlaylistExplorer: React.FC = () => {
             onClick={() => fetchContent()}
             disabled={loading}
             className="p-3 bg-white dark:bg-slate-800 text-gray-400 hover:text-emerald-500 rounded-xl border border-gray-100 dark:border-slate-700 transition-all shadow-sm"
+            title="Actualiser la liste"
           >
-            {loading ? <Loader2 size={20} className="animate-spin" /> : <Plus size={20} />}
+            <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
+          </button>
+          <button 
+            onClick={() => setShowCreateModal(true)}
+            className="p-3 bg-emerald-500 text-white hover:bg-emerald-600 rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+            title="Créer une nouvelle playlist"
+          >
+            <Plus size={20} />
           </button>
         </div>
       </div>
 
       {/* Tabs de Navigation SoundCloud/Générique */}
-      {connectionStatus[activeProvider] && activeProvider === 'soundcloud' && (
-        <div className="flex gap-2 mb-8 bg-gray-50 dark:bg-slate-800/50 p-1.5 rounded-2xl w-fit">
-          <button
-            onClick={() => setActiveView('playlists')}
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeView === 'playlists' ? 'bg-white dark:bg-slate-700 text-orange-500 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            Playlists
-          </button>
-          <button
-            onClick={() => setActiveView('likes')}
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeView === 'likes' ? 'bg-white dark:bg-slate-700 text-orange-500 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            Likes
-          </button>
-          <button
-            onClick={() => setActiveView('stream')}
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeView === 'stream' ? 'bg-white dark:bg-slate-700 text-orange-500 shadow-md ring-1 ring-black/5' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            Stream
-          </button>
+      {isAnyConnected && (
+        <div className="flex gap-4 mb-8 overflow-x-auto pb-2 custom-scrollbar">
+          {providers.map((p) => connectionStatus[p.id] && (
+            <button
+              key={p.id}
+              onClick={() => setActiveTabProvider(p.id)}
+              className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-sm font-black transition-all ${activeProvider === p.id ? 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white shadow-xl shadow-gray-200/50 dark:shadow-none ring-1 ring-gray-100 dark:ring-slate-700' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+            >
+              <ProviderIcon provider={p.id} size={20} />
+              <span className="uppercase tracking-widest text-[10px]">{p.name}</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -373,7 +471,7 @@ const PlaylistExplorer: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {playlists.map((playlist) => (
+          {filteredItems.map((playlist) => (
             <motion.div
               key={playlist.id}
               initial={{ opacity: 0, scale: 0.95 }}
@@ -381,12 +479,18 @@ const PlaylistExplorer: React.FC = () => {
               whileHover={{ y: -5 }}
               className="group bg-white dark:bg-slate-900 rounded-[2.5rem] overflow-hidden border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-2xl hover:shadow-emerald-500/10 transition-all"
             >
-              <div className="aspect-square relative overflow-hidden">
-                <img 
-                  src={playlist.cover_url || 'https://via.placeholder.com/300?text=Playlist'} 
-                  alt={playlist.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                />
+              <div className="aspect-square relative overflow-hidden bg-gray-100 dark:bg-slate-800">
+                {playlist.cover_url ? (
+                  <img 
+                    src={playlist.cover_url} 
+                    alt={playlist.name}
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-400">
+                    <Music size={48} />
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6">
                   <button 
                     onClick={() => downloadPlaylist(playlist)}
@@ -440,7 +544,7 @@ const PlaylistExplorer: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-1">
                     <button 
-                      onClick={() => {/* Implémenter suppression */}}
+                      onClick={() => handleDeletePlaylist(playlist)}
                       className="p-2 text-gray-300 hover:text-red-500 transition-colors"
                       title="Supprimer la playlist"
                     >
@@ -481,6 +585,79 @@ const PlaylistExplorer: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal de Création de Playlist */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCreateModal(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500" />
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Nouvelle Playlist</h3>
+                <button 
+                  onClick={() => setShowCreateModal(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nom de la playlist</label>
+                  <input
+                    type="text"
+                    value={newPlaylistName}
+                    onChange={(e) => setNewPlaylistName(e.target.value)}
+                    placeholder="Ma super playlist"
+                    className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-emerald-500 rounded-2xl outline-none transition-all font-bold text-gray-700 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Description (optionnelle)</label>
+                  <textarea
+                    value={newPlaylistDescription}
+                    onChange={(e) => setNewPlaylistDescription(e.target.value)}
+                    placeholder="Une petite description..."
+                    rows={3}
+                    className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-emerald-500 rounded-2xl outline-none transition-all font-bold text-gray-700 dark:text-white resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 pt-4">
+                  <button
+                    onClick={() => setShowCreateModal(false)}
+                    className="flex-1 py-4 text-sm font-black text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={handleCreatePlaylist}
+                    disabled={creating || !newPlaylistName.trim()}
+                    className="flex-[2] py-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-200 dark:disabled:bg-slate-800 text-white rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    {creating ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                    Créer sur {activeProvider}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

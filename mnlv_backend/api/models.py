@@ -10,6 +10,10 @@ class ProviderAuth(models.Model):
         ('deezer', 'Deezer'),
         ('apple_music', 'Apple Music'),
         ('tidal', 'Tidal'),
+        ('soundcloud', 'SoundCloud'),
+        ('amazon_music', 'Amazon Music'),
+        ('youtube_music', 'YouTube Music'),
+        ('boomplay', 'Boomplay'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='provider_auths')

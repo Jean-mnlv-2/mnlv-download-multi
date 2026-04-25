@@ -1,7 +1,7 @@
 from rest_framework import status, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.generics import RetrieveAPIView, CreateAPIView
+from rest_framework.generics import RetrieveAPIView, CreateAPIView, ListAPIView
 from django.shortcuts import get_object_or_404, redirect
 from django.contrib.auth.models import User
 from django.conf import settings
@@ -13,6 +13,7 @@ from downloader.providers.factory import ProviderFactory
 from downloader.providers.apple_music.provider import AppleMusicProvider
 from downloader.providers.deezer.provider import DeezerProvider
 from .models import ProviderAuth
+from .tasks import refresh_spotify_token, refresh_deezer_token, refresh_tidal_token
 from .serializers import (
     DownloadTaskSerializer,
     CreateDownloadTaskSerializer,
@@ -21,16 +22,20 @@ from .serializers import (
 )
 from .mixins import StandardizedErrorMixin
 from core.logger_utils import get_mnlv_logger
+import os
+import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
+from django.utils import timezone
 from dataclasses import asdict
+from datetime import timedelta
 import logging
 
 logger = get_mnlv_logger("api")
 
-MAX_PLAYLIST_TRACKS = 500
+MAX_PLAYLIST_TRACKS = int(os.getenv("MAX_PLAYLIST_TRACKS", "500"))
 
 def get_provider_auth(user, provider_name):
     return ProviderAuth.objects.filter(user=user, provider=provider_name).first()
@@ -49,6 +54,11 @@ class ProviderAuthStatusView(APIView):
             'spotify': 'spotify' in connected_providers,
             'deezer': 'deezer' in connected_providers,
             'apple_music': 'apple_music' in connected_providers,
+            'boomplay': 'boomplay' in connected_providers,
+            'soundcloud': 'soundcloud' in connected_providers,
+            'tidal': 'tidal' in connected_providers,
+            'amazon_music': 'amazon_music' in connected_providers,
+            'youtube_music': 'youtube_music' in connected_providers,
         }
         logger.info(f"Auth status check for user {request.user.id}: {status_dict}")
         return Response(status_dict)
@@ -84,11 +94,11 @@ class SpotifyLoginView(APIView):
                 client_id=settings.SPOTIFY_CLIENT_ID,
                 client_secret=settings.SPOTIFY_CLIENT_SECRET,
                 redirect_uri=settings.SPOTIFY_REDIRECT_URI,
-                scope="playlist-modify-public playlist-modify-private playlist-read-private user-library-read",
+                scope=settings.SPOTIFY_ADS_SCOPE,
                 state=str(user.id)
             )
             auth_url = sp_oauth.get_authorize_url()
-            logger.info(f"Spotify auth URL generated for user {user.id}")
+            logger.info(f"Spotify auth URL generated for user {user.id} with redirect: {settings.SPOTIFY_REDIRECT_URI}")
 
             if "text/html" in request.accepted_media_type:
                 return redirect(auth_url)
@@ -106,23 +116,29 @@ class SpotifyCallbackView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
+        error = request.GET.get('error')
         code = request.GET.get('code')
         user_id = request.GET.get('state')
 
+        if error:
+            logger.warning(f"Spotify callback error: {error}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=spotify&reason={error}')
+
         if not code or not user_id:
             logger.warning(f"Spotify callback missing code or state: code={code}, state={user_id}")
-            return Response({"error": "Code ou State manquant"}, status=status.HTTP_400_BAD_REQUEST)
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=spotify&reason=missing_parameters')
 
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             logger.warning(f"Spotify callback invalid user_id: {user_id}")
-            return Response({"error": "Utilisateur invalide"}, status=status.HTTP_400_BAD_REQUEST)
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=spotify&reason=invalid_user')
 
+        backend_callback = settings.SPOTIFY_REDIRECT_URI
         sp_oauth = SpotifyOAuth(
             client_id=settings.SPOTIFY_CLIENT_ID,
             client_secret=settings.SPOTIFY_CLIENT_SECRET,
-            redirect_uri=settings.SPOTIFY_REDIRECT_URI
+            redirect_uri=backend_callback
         )
 
         try:
@@ -138,6 +154,7 @@ class SpotifyCallbackView(APIView):
                     defaults={
                         'access_token': token_info['access_token'],
                         'refresh_token': token_info.get('refresh_token'),
+                        'expires_at': timezone.now() + timedelta(seconds=token_info.get('expires_in', 3600))
                     }
                 )
             logger.info(f"Spotify auth successful for user {user_id}")
@@ -148,18 +165,170 @@ class SpotifyCallbackView(APIView):
 
 class DeezerLoginView(APIView):
     """
-    Placeholder pour le login Deezer
+    Endpoint GET /api/auth/providers/deezer/login/
+    Génère l'URL d'autorisation Deezer.
     """
     permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
-        return Response({
-            "status": "auth_required",
-            "message": "Connexion requise. Connectez vos comptes musicaux pour explorer vos playlists et les télécharger en un clic."
-        }, status=status.HTTP_200_OK)
 
-from downloader.providers.apple_music.provider import AppleMusicProvider
-from downloader.providers.deezer.provider import DeezerProvider
-from dataclasses import asdict
+    def get(self, request):
+        app_id = settings.DEEZER_APP_ID
+        backend_callback = f"{settings.BACKEND_URL.rstrip('/')}/api/auth/providers/deezer/callback/"
+        
+        perms = "basic_access,offline_access,manage_library,delete_library"
+        auth_url = f"https://connect.deezer.com/oauth/auth.php?app_id={app_id}&redirect_uri={backend_callback}&perms={perms}&state={request.user.id}"
+        
+        logger.info(f"Deezer auth URL generated for user {request.user.id} with redirect: {backend_callback}")
+        return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
+
+class DeezerCallbackView(APIView):
+    """
+    Endpoint GET /api/auth/providers/deezer/callback/
+    Gère le retour de Deezer et stocke le token.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        error = request.GET.get('error')
+        code = request.GET.get('code')
+        user_id = request.GET.get('state')
+
+        if error:
+            logger.warning(f"Deezer callback error: {error}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=deezer&reason={error}')
+
+        if not code or not user_id:
+            logger.warning(f"Deezer callback missing code or state: code={code}, state={user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=deezer&reason=missing_parameters')
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            logger.warning(f"Deezer callback invalid user_id: {user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=deezer&reason=invalid_user')
+
+        try:
+            app_id = settings.DEEZER_APP_ID
+            secret = settings.DEEZER_SECRET_KEY
+            
+            token_url = f"https://connect.deezer.com/oauth/access_token.php?app_id={app_id}&secret={secret}&code={code}&output=json"
+            response = requests.get(token_url)
+            token_data = response.json()
+            
+            if 'access_token' not in token_data:
+                logger.error(f"Deezer token exchange failed for user {user_id}: {token_data}")
+                return redirect(f'{settings.FRONTEND_URL}/?auth_error=deezer&reason=token_exchange_failed')
+
+            with transaction.atomic():
+                ProviderAuth.objects.update_or_create(
+                    user=user,
+                    provider='deezer',
+                    defaults={
+                        'access_token': token_data['access_token'],
+                        'expires_at': timezone.now() + timedelta(seconds=int(token_data.get('expires', 3600))) if token_data.get('expires') else None
+                    }
+                )
+            
+            logger.info(f"Deezer auth successful for user {user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_success=deezer')
+        except Exception as e:
+            logger.exception(f"Deezer callback error: {e}")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class SoundCloudLoginView(APIView):
+    """
+    Endpoint GET /api/auth/providers/soundcloud/login/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        client_id = settings.SOUNDCLOUD_CLIENT_ID
+        backend_callback = f"{settings.BACKEND_URL.rstrip('/')}/api/auth/providers/soundcloud/callback/"
+        auth_url = f"https://soundcloud.com/connect?client_id={client_id}&redirect_uri={backend_callback}&response_type=code&state={request.user.id}"
+        
+        return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
+
+class SoundCloudCallbackView(APIView):
+    """
+    Endpoint GET /api/auth/providers/soundcloud/callback/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        error = request.GET.get('error')
+        code = request.GET.get('code')
+        user_id = request.GET.get('state')
+        
+        if error:
+            logger.warning(f"SoundCloud callback error: {error}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=soundcloud&reason={error}')
+
+        if not code or not user_id:
+            logger.warning(f"SoundCloud callback missing code or state: code={code}, state={user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=soundcloud&reason=missing_parameters')
+            
+        try:
+            user = User.objects.get(id=user_id)
+            return redirect(f'{settings.FRONTEND_URL}/?auth_success=soundcloud')
+        except User.DoesNotExist:
+            logger.warning(f"SoundCloud callback invalid user_id: {user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=soundcloud&reason=invalid_user')
+        except Exception as e:
+            logger.exception(f"SoundCloud callback error: {e}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=soundcloud&reason=unknown')
+
+class AmazonMusicLoginView(APIView):
+    """
+    Endpoint GET /api/auth/providers/amazon-music/login/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response({"message": "Amazon Music login non encore implémenté"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+
+class TidalLoginView(APIView):
+    """
+    Endpoint GET /api/auth/providers/tidal/login/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        client_id = getattr(settings, 'TIDAL_CLIENT_ID', None)
+        if not client_id:
+            return Response({"error": "Tidal Client ID non configuré"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        backend_callback = f"{settings.BACKEND_URL.rstrip('/')}/api/auth/providers/tidal/callback/"
+        auth_url = f"https://login.tidal.com/authorize?client_id={client_id}&redirect_uri={backend_callback}&response_type=code&scope=playlists.edit&state={request.user.id}"
+        
+        return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
+
+class TidalCallbackView(APIView):
+    """
+    Endpoint GET /api/auth/providers/tidal/callback/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        error = request.GET.get('error')
+        code = request.GET.get('code')
+        user_id = request.GET.get('state')
+        
+        if error:
+            logger.warning(f"Tidal callback error: {error}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason={error}')
+
+        if not code or not user_id:
+            logger.warning(f"Tidal callback missing code or state: code={code}, state={user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=missing_parameters')
+            
+        try:
+            user = User.objects.get(id=user_id)
+            return redirect(f'{settings.FRONTEND_URL}/?auth_success=tidal')
+        except User.DoesNotExist:
+            logger.warning(f"Tidal callback invalid user_id: {user_id}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=invalid_user')
+        except Exception as e:
+            logger.exception(f"Tidal callback error: {e}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=unknown')
 
 class AppleMusicTokenView(APIView):
     """
@@ -183,39 +352,6 @@ class AppleMusicTokenView(APIView):
             if "load PEM file" in str(e):
                 return Response({"error": "La clé secrète Apple Music est malformée. Assurez-vous qu'il s'agit d'un fichier .p8 valide."}, status=status.HTTP_400_BAD_REQUEST)
             return Response({"error": "Erreur lors de la génération du token Apple Music"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class SoundCloudLoginView(APIView):
-    """
-    Placeholder pour le login SoundCloud
-    """
-    permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
-        return Response({
-            "status": "auth_required",
-            "message": "Connexion requise. Connectez vos comptes musicaux pour explorer vos playlists et les télécharger en un clic."
-        }, status=status.HTTP_200_OK)
-
-class AmazonMusicLoginView(APIView):
-    """
-    Placeholder pour le login Amazon Music
-    """
-    permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
-        return Response({
-            "status": "auth_required",
-            "message": "Connexion requise. Connectez vos comptes musicaux pour explorer vos playlists et les télécharger en un clic."
-        }, status=status.HTTP_200_OK)
-
-class TidalLoginView(APIView):
-    """
-    Placeholder pour le login Tidal
-    """
-    permission_classes = [permissions.IsAuthenticated]
-    def get(self, request):
-        return Response({
-            "status": "auth_required",
-            "message": "Connexion requise. Connectez vos comptes musicaux pour explorer vos playlists et les télécharger en un clic."
-        }, status=status.HTTP_200_OK)
 
 class AppleMusicLoginView(APIView):
     """
@@ -430,6 +566,40 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
             return self.error_response("Données invalides", data=serializer.errors)
 
         url = serializer.validated_data['url']
+        
+        if any(url.lower().endswith(ext) for ext in ['.csv', '.txt']):
+            try:
+                import requests
+                content = requests.get(url, timeout=10).text
+                urls = [line.strip() for line in content.splitlines() if line.strip().startswith('http')]
+                if urls:
+                    from csv_handler.models import PendingFileUpload
+                    resolved_tracks = []
+                    for t_url in urls[:MAX_PLAYLIST_TRACKS]:
+                        resolved_tracks.append({
+                            "title": t_url.split('/')[-1] if '/' in t_url else t_url,
+                            "artist": "Source externe",
+                            "url": t_url,
+                            "provider": "batch",
+                            "status": "ready"
+                        })
+                    
+                    PendingFileUpload.objects.create(
+                        user=request.user,
+                        filename=f"Batch : {url.split('/')[-1]}",
+                        data=resolved_tracks
+                    )
+                    
+                    return Response({
+                        "status": "success",
+                        "type": "staged_playlist",
+                        "message": f"Fichier batch analysé : {len(resolved_tracks)} morceaux trouvés.",
+                        "tracks": resolved_tracks,
+                        "count": len(resolved_tracks)
+                    }, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                logger.error(f"Failed to parse batch file from URL: {e}")
+
         media_type = serializer.validated_data.get('media_type', DownloadTask.MediaType.AUDIO)
         prefer_video = serializer.validated_data.get('prefer_video', False)
         quality = serializer.validated_data.get('quality')
@@ -441,33 +611,35 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
 
             if "/playlist/" in url or "/album/" in url:
                 tracks = provider.get_playlist_tracks(url)
-
-                tasks_to_create = []
+                
+                from csv_handler.models import PendingFileUpload
+                
+                resolved_tracks = []
                 for track in tracks[:MAX_PLAYLIST_TRACKS]:
                     if explicit_filter and getattr(track, 'explicit', False):
                         continue
-                    tasks_to_create.append(DownloadTask(
-                        user=request.user,
-                        original_url=track.original_url or url,
-                        provider=provider_name,
-                        media_type=media_type,
-                        prefer_video=prefer_video,
-                        quality=quality,
-                        explicit_filter=explicit_filter
-                    ))
+                    resolved_tracks.append({
+                        "title": track.title,
+                        "artist": track.artist,
+                        "url": track.original_url,
+                        "provider": provider_name,
+                        "cover_url": getattr(track, 'cover_url', None),
+                        "status": "ready"
+                    })
 
-                created_tasks = DownloadTask.objects.bulk_create(tasks_to_create)
+                PendingFileUpload.objects.create(
+                    user=request.user,
+                    filename=f"Playlist {provider_name.title()} : {url.split('/')[-1]}",
+                    data=resolved_tracks
+                )
 
-                for task in created_tasks:
-                    process_playlist_item.delay(str(task.id))
-
-                tasks_info = [{"task_id": str(task.id), "title": task.original_url} for task in created_tasks]
-                logger.info(f"Playlist download: {len(created_tasks)} tasks created for user {request.user.id}")
+                logger.info(f"Playlist staged for preview: {len(resolved_tracks)} tracks for user {request.user.id}")
                 return Response({
                     "status": "success",
-                    "type": "playlist",
-                    "count": len(tasks_info),
-                    "tasks": tasks_info,
+                    "type": "staged_playlist",
+                    "message": f"Playlist analysée : {len(resolved_tracks)} morceaux trouvés.",
+                    "tracks": resolved_tracks,
+                    "count": len(resolved_tracks),
                     "provider": provider_name
                 }, status=status.HTTP_201_CREATED)
 
@@ -502,6 +674,17 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
         except Exception as e:
             return self.handle_exception(e)
 
+class DownloadTaskListView(ListAPIView):
+    """
+    Endpoint GET /api/tasks/history/
+    Récupère l'historique complet des téléchargements de l'utilisateur.
+    """
+    serializer_class = DownloadTaskSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return DownloadTask.objects.filter(user=self.request.user).order_by('-created_at')
+
 class DownloadTaskStatusView(RetrieveAPIView):
     """
     Endpoint GET /api/task/{task_id}/status/
@@ -510,6 +693,33 @@ class DownloadTaskStatusView(RetrieveAPIView):
     queryset = DownloadTask.objects.all()
     serializer_class = DownloadTaskSerializer
     lookup_field = 'id'
+
+class BulkCancelTasksView(APIView):
+    """
+    Endpoint POST /api/tasks/cancel-all/
+    Annule toutes les tâches en cours ou en attente de l'utilisateur.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            updated_count = DownloadTask.objects.filter(
+                user=request.user,
+                status__in=[DownloadTask.Status.PENDING, DownloadTask.Status.PROCESSING]
+            ).update(
+                status=DownloadTask.Status.FAILED,
+                error_message="Annulé par l'utilisateur"
+            )
+            
+            logger.info(f"Bulk cancel: {updated_count} tasks cancelled for user {request.user.id}")
+            return Response({
+                "status": "success",
+                "message": f"{updated_count} tâches ont été annulées.",
+                "cancelled_count": updated_count
+            })
+        except Exception as e:
+            logger.exception(f"Error in BulkCancelTasksView: {e}")
+            return Response({"error": "Erreur lors de l'annulation des tâches"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class BulkDownloadView(StandardizedErrorMixin, APIView):
     """
@@ -553,7 +763,7 @@ class BulkDownloadView(StandardizedErrorMixin, APIView):
                 {
                     "task_id": str(task.id), 
                     "url": task.original_url,
-                    "title": task.original_url.split('/')[-1] if '/' in task.original_url else task.original_url,
+                    "title": "Téléchargement en cours...", # Titre temporaire plus propre
                     "provider": task.provider,
                     "status": task.status
                 } 
@@ -616,17 +826,33 @@ class HealthCheckView(APIView):
         
         return Response(status_info, status=overall_status)
 
+from django.http import FileResponse
+
 class DownloadFileView(APIView):
     """
     Endpoint GET /api/task/{task_id}/download/
-    Fournit le fichier final si le téléchargement est terminé.
+    Sert le fichier final pour le téléchargement local.
     """
+    permission_classes = [permissions.IsAuthenticated]
+
     def get(self, request, task_id):
         task = get_object_or_404(DownloadTask, id=task_id)
+        
         if task.status != DownloadTask.Status.COMPLETED or not task.result_file:
             return Response({"error": "Le fichier n'est pas encore prêt."}, status=status.HTTP_400_BAD_REQUEST)
         
-        return Response({"download_url": task.result_file.url}, status=status.HTTP_200_OK)
+        try:
+            file_path = task.result_file.path
+            if not os.path.exists(file_path):
+                return Response({"error": "Fichier physique introuvable sur le serveur."}, status=status.HTTP_404_NOT_FOUND)
+            
+            filename = os.path.basename(file_path)
+            response = FileResponse(open(file_path, 'rb'))
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            logger.error(f"Error serving file for task {task_id}: {e}")
+            return Response({"error": "Erreur lors de la récupération du fichier."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PlaylistActionView(StandardizedErrorMixin, APIView):
     """
@@ -645,16 +871,31 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
         provider_url = data['provider_url']
 
         auth_token = data.get('auth_token')
+        provider_name = data.get('provider') or (
+            'spotify' if 'spotify.com' in provider_url else
+            'deezer' if 'deezer.com' in provider_url else
+            'apple_music' if 'apple.com' in provider_url else
+            'boomplay' if 'boomplay.com' in provider_url or 'boomplaymusic.com' in provider_url else
+            None
+        )
+
         if not auth_token:
-            provider_name = data.get('provider') or (
-                'spotify' if 'spotify.com' in provider_url else
-                'deezer' if 'deezer.com' in provider_url else
-                'apple_music' if 'apple.com' in provider_url else
-                None
-            )
             if provider_name:
                 auth_obj = get_provider_auth(request.user, provider_name)
                 if auth_obj:
+                    if auth_obj.expires_at and auth_obj.expires_at <= timezone.now() + timedelta(minutes=1):
+                        logger.info(f"Token {provider_name} expiré pour {request.user.id}, rafraîchissement...")
+                        try:
+                            if provider_name == 'spotify':
+                                refresh_spotify_token(auth_obj)
+                            elif provider_name == 'deezer':
+                                refresh_deezer_token(auth_obj)
+                            elif provider_name == 'tidal':
+                                refresh_tidal_token(auth_obj)
+                            auth_obj.refresh_from_db()
+                        except Exception as e:
+                            logger.error(f"Échec du refresh automatique {provider_name}: {e}")
+                    
                     auth_token = auth_obj.access_token
 
         if not auth_token:
@@ -662,7 +903,65 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
             return self.error_response("Veuillez connecter votre compte pour cette action.", status_code=status.HTTP_401_UNAUTHORIZED)
 
         try:
-            provider = ProviderFactory.get_provider(provider_url, auth_token=auth_token)
+            effective_url = provider_url.strip()
+            
+            if not effective_url.startswith(('http://', 'https://')):
+                effective_url = 'https://' + effective_url
+
+            lower_url = effective_url.lower()
+            provider_domain_map = {
+                'spotify.com': 'https://open.spotify.com',
+                'deezer.com': 'https://www.deezer.com',
+                'apple.com': 'https://music.apple.com',
+                'tidal.com': 'https://tidal.com',
+                'soundcloud.com': 'https://soundcloud.com',
+                'youtube.com': 'https://music.youtube.com',
+                'amazon.com': 'https://music.amazon.com',
+                'boomplay.com': 'https://www.boomplay.com',
+                'boomplaymusic.com': 'https://www.boomplay.com',
+            }
+            
+            for domain, canonical in provider_domain_map.items():
+                if domain in lower_url and not any(x in lower_url for x in ['/track/', '/playlist/', '/album/', '/song/']):
+                    effective_url = canonical
+                    break
+                
+            try:
+                provider = ProviderFactory.get_provider(effective_url, auth_token=auth_token)
+            except ValueError:
+                explicit_provider = data.get('provider')
+                if explicit_provider:
+                    try:
+                        if explicit_provider == 'spotify':
+                            from downloader.providers.spotify import SpotifyProvider
+                            provider = SpotifyProvider(auth_token=auth_token)
+                        elif explicit_provider == 'deezer':
+                            from downloader.providers.deezer import DeezerProvider
+                            provider = DeezerProvider(auth_token=auth_token)
+                        elif explicit_provider == 'apple_music':
+                            from downloader.providers.apple_music import AppleMusicProvider
+                            provider = AppleMusicProvider(auth_token=auth_token)
+                        elif explicit_provider == 'tidal':
+                            from downloader.providers.tidal import TidalProvider
+                            provider = TidalProvider(auth_token=auth_token)
+                        elif explicit_provider == 'soundcloud':
+                            from downloader.providers.soundcloud import SoundCloudProvider
+                            provider = SoundCloudProvider(auth_token=auth_token)
+                        elif explicit_provider == 'youtube_music':
+                            from downloader.providers.youtube_music import YouTubeMusicProvider
+                            provider = YouTubeMusicProvider(auth_token=auth_token)
+                        elif explicit_provider == 'amazon_music':
+                            from downloader.providers.amazon_music import AmazonMusicProvider
+                            provider = AmazonMusicProvider(auth_token=auth_token)
+                        elif explicit_provider == 'boomplay':
+                            from downloader.providers.boomplay import BoomplayProvider
+                            provider = BoomplayProvider(auth_token=auth_token)
+                        else:
+                            raise ValueError(f"Provider explicite non reconnu : {explicit_provider}")
+                    except (ImportError, AttributeError):
+                        raise ValueError(f"Impossible de charger le provider : {explicit_provider}")
+                else:
+                    raise
 
             if action == 'CREATE':
                 if not data.get('name'):
@@ -674,9 +973,26 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
             elif action == 'DELETE':
                 if not data.get('playlist_id'):
                     return self.error_response("ID requis pour la suppression")
-                provider.delete_playlist(data['playlist_id'])
-                logger.info(f"Playlist {data['playlist_id']} deleted by user {request.user.id}")
+                
+                is_audiobook = data.get('item_type') == 'audiobook' or '/audiobook/' in provider_url
+                
+                if is_audiobook and hasattr(provider, 'remove_audiobook'):
+                    provider.remove_audiobook(data['playlist_id'])
+                    logger.info(f"Audiobook {data['playlist_id']} removed by user {request.user.id}")
+                else:
+                    provider.delete_playlist(data['playlist_id'])
+                    logger.info(f"Playlist {data['playlist_id']} deleted by user {request.user.id}")
+                
                 return Response({"status": "deleted"}, status=status.HTTP_200_OK)
+
+            elif action == 'SAVE_AUDIOBOOK':
+                if not data.get('playlist_id'):
+                    return self.error_response("ID du livre audio requis")
+                if hasattr(provider, 'save_audiobook'):
+                    provider.save_audiobook(data['playlist_id'])
+                    logger.info(f"Audiobook {data['playlist_id']} saved by user {request.user.id}")
+                    return Response({"status": "saved"}, status=status.HTTP_200_OK)
+                return self.error_response("Ce provider ne supporte pas l'enregistrement de livres audio.", status_code=status.HTTP_405_METHOD_NOT_ALLOWED)
 
             elif action == 'ADD_TRACKS':
                 if not data.get('playlist_id') or not data.get('track_urls'):
@@ -714,9 +1030,23 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
                 return Response({"status": "reordered", "snapshot_id": new_snapshot}, status=status.HTTP_200_OK)
 
             elif action == 'GET_LIST':
-                playlists = provider.get_user_playlists()
-                logger.info(f"Playlists retrieved for user {request.user.id}")
-                return Response({"status": "success", "playlists": playlists}, status=status.HTTP_200_OK)
+                try:
+                    items = provider.get_user_playlists()
+                    
+                    if provider_name == 'spotify' or 'spotify.com' in provider_url:
+                        if hasattr(provider, 'get_user_audiobooks'):
+                            audiobooks = provider.get_user_audiobooks()
+                            items.extend(audiobooks)
+                            
+                    logger.info(f"Library items (playlists/audiobooks) retrieved for user {request.user.id}")
+                    return Response({"status": "success", "playlists": items}, status=status.HTTP_200_OK)
+                except Exception as e:
+                    if "403" in str(e) and "not registered" in str(e):
+                        return self.error_response(
+                            "Votre compte Spotify n'est pas autorisé. Ajoutez votre email dans 'Users and Access' sur le Dashboard Spotify.",
+                            status_code=status.HTTP_403_FORBIDDEN
+                        )
+                    raise
 
             elif action == 'GET_DETAILS':
                 details = provider.get_playlist_details(provider_url)

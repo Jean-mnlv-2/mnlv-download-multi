@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     
     path('api/', include('api.urls')),
+    path('api/spotify_ads/', include('spotify_ads.urls')),
 ]
 
 if settings.DEBUG:

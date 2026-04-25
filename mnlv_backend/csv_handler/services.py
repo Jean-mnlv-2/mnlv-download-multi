@@ -2,6 +2,7 @@ import csv
 import io
 import pandas as pd
 from typing import List, Dict
+from django.core.cache import cache
 from downloader.providers.spotify import SpotifyProvider
 
 class FileParserService:
@@ -184,17 +185,27 @@ class FileParserService:
                 if item.get('artist'):
                     query += f" artist:{item['artist']}"
                 
+                # Check cache first
+                cache_key = f"resolve:{query}"
+                cached_track = cache.get(cache_key)
+                if cached_track:
+                    resolved_tracks.append(cached_track)
+                    continue
+                
                 try:
                     results = provider.client.search(q=query, type='track', limit=1)
                     if results['tracks']['items']:
                         track = results['tracks']['items'][0]
-                        resolved_tracks.append({
+                        res_item = {
                             'title': track['name'],
                             'artist': track['artists'][0]['name'],
                             'url': track['external_urls']['spotify'],
                             'provider': 'spotify',
                             'status': 'ready'
-                        })
+                        }
+                        # Cache the result for 24 hours
+                        cache.set(cache_key, res_item, timeout=86400)
+                        resolved_tracks.append(res_item)
                     else:
                         resolved_tracks.append({
                             **item,

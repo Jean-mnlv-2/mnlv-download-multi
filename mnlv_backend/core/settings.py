@@ -2,9 +2,11 @@ import os
 import sys
 from pathlib import Path
 from datetime import timedelta
+from dotenv import load_dotenv
 import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-mnlv-fallback-key-2026')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -29,6 +31,7 @@ INSTALLED_APPS = [
     'downloader.apps.DownloaderConfig',
     'media_tools.apps.MediaToolsConfig',
     'csv_handler.apps.CsvHandlerConfig',
+    'spotify_ads.apps.SpotifyAdsConfig',
 ]
 
 ASGI_APPLICATION = 'core.asgi.application'
@@ -52,6 +55,27 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# Security Headers
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+X_FRAME_OPTIONS = 'DENY'
+SECURE_PERMISSIONS_POLICY = {
+    "accelerometer": [],
+    "autoplay": ["self"],
+    "camera": [],
+    "display-capture": [],
+    "encrypted-media": ["self"],
+    "fullscreen": ["self"],
+    "geolocation": [],
+    "gyroscope": [],
+    "magnetometer": [],
+    "microphone": [],
+    "midi": [],
+    "payment": [],
+    "usb": [],
+}
 
 ROOT_URLCONF = 'core.urls'
 
@@ -137,9 +161,9 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle'
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',
-        'user': '1000/day',
-        'downloads': '500/hour',
+        'anon': '1000/hour',
+        'user': '10000/day',
+        'downloads': '1000/hour',
     }
 }
 
@@ -153,7 +177,7 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173').split(',')
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://localhost:3000,http://localhost:3003,http://127.0.0.1:3003').split(',')
 CORS_ALLOW_CREDENTIALS = True
 
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
@@ -191,6 +215,8 @@ LOGGING = {
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8002/api/auth/providers/spotify/callback/')
+SPOTIFY_ADS_API_BASE = os.getenv('SPOTIFY_ADS_API_BASE', 'https://api-partner.spotify.com/ads/v3')
+SPOTIFY_ADS_SCOPE = os.getenv('SPOTIFY_ADS_SCOPE', 'playlist-modify-public playlist-modify-private playlist-read-private user-library-read')
 
 DEEZER_APP_ID = os.getenv('DEEZER_APP_ID')
 DEEZER_SECRET_KEY = os.getenv('DEEZER_SECRET_KEY')
@@ -201,11 +227,27 @@ APPLE_MUSIC_KEY_ID = os.getenv('APPLE_MUSIC_KEY_ID')
 APPLE_MUSIC_SECRET_KEY = os.getenv('APPLE_MUSIC_SECRET_KEY')
 APPLE_MUSIC_API_BASE = os.getenv('APPLE_MUSIC_API_BASE', 'https://api.music.apple.com/v1')
 
+# Tidal Configuration
+TIDAL_TOKEN_TYPE = os.getenv('TIDAL_TOKEN_TYPE', 'Bearer')
+TIDAL_ACCESS_TOKEN = os.getenv('TIDAL_ACCESS_TOKEN')
+TIDAL_REFRESH_TOKEN = os.getenv('TIDAL_REFRESH_TOKEN')
+TIDAL_EXPIRY = os.getenv('TIDAL_EXPIRY')
+
+# Boomplay Configuration
+BOOMPLAY_APP_ID = os.getenv('BOOMPLAY_APP_ID')
+BOOMPLAY_ACCESS_TOKEN = os.getenv('BOOMPLAY_ACCESS_TOKEN')
+BOOMPLAY_API_BASE = os.getenv('BOOMPLAY_API_BASE', 'https://openapi.boomplay.com')
+
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3003')
+BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:8002')
 
 CELERY_BEAT_SCHEDULE = {
     'cleanup-old-files-every-30m': {
         'task': 'downloader.tasks.cleanup_old_files',
         'schedule': timedelta(minutes=30),
+    },
+    'refresh-provider-tokens-every-15m': {
+        'task': 'api.tasks.refresh_provider_tokens',
+        'schedule': timedelta(minutes=15),
     },
 }
