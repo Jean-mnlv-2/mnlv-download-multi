@@ -48,17 +48,21 @@ class ProviderFactory:
         """
         Analyse l'URL et retourne une instance du provider correspondant.
         auth_token peut être passé pour les opérations d'écriture (playlists).
+        Optimisé pour réutiliser les instances si nécessaire.
         """
         if not ProviderFactory._providers:
             ProviderFactory.initialize()
 
+        url = url.strip()
+
         for ProviderClass in ProviderFactory._providers:
             try:
                 provider = ProviderClass(auth_token=auth_token)
-            except TypeError:
-                provider = ProviderClass()
-                
-            if provider.supports_url(url):
-                return provider
+                if provider.supports_url(url):
+                    logger.info(f"Provider détecté : {ProviderClass.__name__} pour l'URL : {url[:30]}...")
+                    return provider
+            except Exception as e:
+                logger.debug(f"Le provider {ProviderClass.__name__} ne supporte pas l'URL ou erreur init: {e}")
+                continue
         
         raise ValueError(f"URL non supportée ou provider inconnu : {url}")

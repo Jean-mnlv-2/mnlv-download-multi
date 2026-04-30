@@ -17,6 +17,7 @@ class MediaService:
         """
         Convertit un fichier media vers un format cible via FFmpeg.
         Supporte les formats pro (WAV, FLAC, ALAC) et WebRadio/TV (OPUS, AAC).
+        Optimisé pour la qualité studio (44.1kHz / 16-bit PCM pour WAV).
         """
         input_file = Path(input_path)
         ext = f".{target_format.lower()}"
@@ -25,13 +26,13 @@ class MediaService:
         cmd = ['ffmpeg', '-y', '-i', str(input_file)]
         
         if target_format == 'FLAC':
-            cmd += ['-c:a', 'flac']
+            cmd += ['-c:a', 'flac', '-compression_level', '8']
         elif target_format == 'ALAC':
             cmd += ['-c:a', 'alac']
         elif target_format == 'WAV':
-            cmd += ['-c:a', 'pcm_s16le']
+            cmd += ['-c:a', 'pcm_s16le', '-ar', '44100']
         elif target_format == 'OPUS':
-            cmd += ['-c:a', 'libopus', '-b:a', '128k']
+            cmd += ['-c:a', 'libopus', '-b:a', '128k', '-vbr', 'on', '-compression_level', '10']
         elif target_format == 'AAC':
             cmd += ['-c:a', 'aac', '-b:a', '256k']
         elif target_format == 'MKV':

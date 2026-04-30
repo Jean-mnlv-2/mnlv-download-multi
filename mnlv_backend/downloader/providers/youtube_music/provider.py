@@ -1,10 +1,13 @@
 from ..base import MusicProvider, TrackMetadata
 import re
+import logging
 try:
     from ytmusicapi import YTMusic
 except ImportError:
     YTMusic = None
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 class YouTubeMusicProvider(MusicProvider):
     """
@@ -22,21 +25,53 @@ class YouTubeMusicProvider(MusicProvider):
     @property
     def yt(self):
         if self._yt is None:
-            self._yt = YTMusic(auth=self.auth_token) if self.auth_token else YTMusic()
+            if self.auth_token:
+                import json
+                try:
+                    cleaned_token = self.auth_token.strip()
+                    if cleaned_token.startswith('{') and cleaned_token.endswith('}'):
+                        auth_headers = json.loads(cleaned_token)
+                        self._yt = YTMusic(auth=auth_headers)
+                    else:
+                        if cleaned_token.startswith('AIza'):
+                            logger.warning("Clé API YouTube v3 fournie au lieu des headers YouTube Music. Utilisation anonyme.")
+                            self._yt = YTMusic()
+                        elif os.path.exists(cleaned_token):
+                            self._yt = YTMusic(auth=cleaned_token)
+                        else:
+                            logger.warning(f"Token YouTube Music non reconnu : {cleaned_token[:10]}...")
+                            self._yt = YTMusic()
+                except Exception as e:
+                    logger.error(f"Erreur d'initialisation YTMusic avec token: {e}")
+                    self._yt = YTMusic()
+            else:
+                self._yt = YTMusic()
         return self._yt
 
     def create_playlist(self, name: str, description: str = "", public: bool = False) -> str:
         """Crée une nouvelle playlist sur YouTube Music"""
-        privacy_status = "PUBLIC" if public else "PRIVATE"
-        playlist_id = self.yt.create_playlist(name, description, privacy_status=privacy_status)
-        return playlist_id
+        if not self.auth_token or self.auth_token.startswith('AIza'):
+            raise Exception("Authentification YouTube Music requise. Veuillez fournir vos headers JSON (cookies) et non une clé API v3 pour les opérations de bibliothèque.")
+            
+        try:
+            privacy_status = "PUBLIC" if public else "PRIVATE"
+            playlist_id = self.yt.create_playlist(name, description, privacy_status=privacy_status)
+            return playlist_id
+        except Exception as e:
+            if "authentication" in str(e).lower():
+                raise Exception("Session YouTube Music expirée ou headers invalides. Veuillez reconnecter votre compte.")
+            raise e
 
     def delete_playlist(self, playlist_id: str):
         """Supprime une playlist sur YouTube Music"""
+        if not self.auth_token or self.auth_token.startswith('AIza'):
+            raise Exception("Authentification requise pour supprimer une playlist.")
         self.yt.delete_playlist(playlist_id)
 
     def add_tracks_to_playlist(self, playlist_id: str, track_urls: List[str]):
         """Ajoute des titres via leurs IDs de vidéo YouTube"""
+        if not self.auth_token or self.auth_token.startswith('AIza'):
+            raise Exception("Authentification requise pour modifier une playlist.")
         video_ids = []
         for url in track_urls:
             try:
@@ -48,8 +83,6 @@ class YouTubeMusicProvider(MusicProvider):
 
     def remove_tracks_from_playlist(self, playlist_id: str, track_urls: List[str]):
         """Retire des titres d'une playlist"""
-        # YTMusicAPI nécessite les setVideoIds (IDs internes à la playlist) pour supprimer, 
-        # ou l'on peut supprimer via videoIds si on récupère la playlist d'abord.
         playlist = self.yt.get_playlist(playlist_id)
         video_ids_to_remove = [self._extract_id(u, "watch?v=") for u in track_urls]
         
@@ -105,6 +138,26 @@ class YouTubeMusicProvider(MusicProvider):
                 original_url=f"https://music.youtube.com/watch?v={item['videoId']}"
             ))
         return tracks
+
+    def get_user_playlists(self) -> List[dict]:
+        """Récupère les playlists de l'utilisateur connecté sur YouTube Music"""
+        if not self.auth_token:
+            return []
+            
+        try:
+            playlists = self.yt.get_library_playlists(limit=50)
+            return [
+                {
+                    'id': p['playlistId'],
+                    'name': p['title'],
+                    'track_count': p.get('count', 0),
+                    'provider': 'youtube_music'
+                }
+                for p in playlists
+            ]
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des playlists YT Music: {e}")
+            return []
 
     def _extract_id(self, url: str, marker: str) -> str:
         """Extrait l'ID de la vidéo ou de la playlist"""

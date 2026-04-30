@@ -117,6 +117,23 @@ const ProviderManager: React.FC = () => {
         return;
       }
 
+      if (provider.id === 'youtube_music') {
+        const authData = window.prompt("Veuillez coller votre clé API YouTube v3 ou vos headers d'authentification JSON (ytmusicapi) :");
+        if (!authData) {
+          setLoading(null);
+          return;
+        }
+
+        await axios.post('/api/auth/providers/youtube-music/connect/', {
+          auth_data: authData
+        });
+
+        addNotification('success', "YouTube Music configuré");
+        await fetchProviderStatus();
+        setLoading(null);
+        return;
+      }
+
       // Autres providers (OAuth2)
       if (!provider.loginUrl) {
         addNotification('info', "La connexion directe pour ce service sera bientôt disponible.");

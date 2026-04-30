@@ -108,12 +108,46 @@ const URLInput: React.FC = () => {
   }, []);
 
   const detectedProvider = useMemo(() => {
-    if (!url || !isUrl) return null;
-    for (const [domain, config] of Object.entries(PROVIDER_CONFIG)) {
-      if (url.includes(domain)) return { ...config, domain };
+    if (!url) return null;
+    
+    if (isUrl) {
+      for (const [domain, config] of Object.entries(PROVIDER_CONFIG)) {
+        if (url.includes(domain)) return { ...config, domain };
+      }
     }
-    return null;
+    
+    return { ...PROVIDER_CONFIG['apple.com'], domain: 'apple.com', isSearch: true };
   }, [url, isUrl]);
+
+  const providerBadge = useMemo(() => {
+    if (!detectedProvider || !url) return null;
+    const Icon = detectedProvider.icon;
+    const isAuth = providerStatus[detectedProvider.key as keyof typeof providerStatus];
+    
+    return (
+      <motion.div 
+        initial={{ opacity: 0, x: -10, scale: 0.8 }}
+        animate={{ opacity: 1, x: 0, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.5 }}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full border shadow-sm transition-all duration-300 ${
+          isAuth 
+            ? 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700' 
+            : 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-900/30'
+        }`}
+      >
+        <Icon size={14} className={detectedProvider.color} />
+        <span className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          {detectedProvider.label}
+        </span>
+        {!isAuth && (
+          <div className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 rounded-md">
+            <ShieldAlert size={10} className="text-amber-600 dark:text-amber-500" />
+            <span className="text-[8px] font-bold text-amber-700 dark:text-amber-500 uppercase">Offline</span>
+          </div>
+        )}
+      </motion.div>
+    );
+  }, [detectedProvider, url, providerStatus]);
 
   const authRequired = useMemo(() => {
     if (detectedProvider && !providerStatus[detectedProvider.key as keyof typeof providerStatus]) {
@@ -130,11 +164,16 @@ const URLInput: React.FC = () => {
 
   const handleCreateAndSelectPlaylist = async () => {
     if (!newPlaylistName.trim() || !detectedProvider) return;
+    
+    let providerUrl = `https://${detectedProvider.key}.com`;
+    if (detectedProvider.key === 'apple_music') providerUrl = 'https://music.apple.com';
+    if (detectedProvider.key === 'youtube_music') providerUrl = 'https://music.youtube.com';
+
     try {
       const res = await axios.post('/api/playlist/manage/', {
         action: 'CREATE',
         provider: detectedProvider.key,
-        provider_url: `https://${detectedProvider.key === 'apple_music' ? 'music.apple' : detectedProvider.key}.com`,
+        provider_url: providerUrl,
         name: newPlaylistName
       });
       addNotification('success', `Playlist "${newPlaylistName}" créée !`);
@@ -148,11 +187,16 @@ const URLInput: React.FC = () => {
   };
 
   const fetchUserPlaylists = async (provider: string) => {
+    // Détermination de l'URL de base correcte pour le provider
+    let providerUrl = `https://${provider}.com`;
+    if (provider === 'apple_music') providerUrl = 'https://music.apple.com';
+    if (provider === 'youtube_music') providerUrl = 'https://music.youtube.com';
+
     try {
       const res = await axios.post('/api/playlist/manage/', {
         action: 'GET_LIST', 
         provider: provider,
-        provider_url: `https://${provider === 'apple_music' ? 'music.apple' : provider}.com`
+        provider_url: providerUrl
       });
       setUserPlaylists(res.data.playlists || []);
     } catch (err) {}
@@ -329,21 +373,15 @@ const URLInput: React.FC = () => {
 
       <form onSubmit={handleSubmit} className="relative bg-white dark:bg-slate-900 border-2 border-transparent dark:border-slate-800 rounded-[2.5rem] shadow-2xl shadow-gray-200/40 dark:shadow-none overflow-hidden focus-within:border-blue-500 focus-within:ring-[12px] focus-within:ring-blue-500/5 transition-all">
         <div className="relative">
-          <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none transition-all duration-500">
-            <motion.div
-              key={detectedProvider?.key || 'default'}
-              initial={{ scale: 0.5, opacity: 0, rotate: -45 }}
-              animate={{ scale: 1, opacity: 1, rotate: 0 }}
-              className={`${detectedProvider?.color || 'text-gray-400'}`}
-            >
-              {detectedProvider ? (
-                <ProviderIcon provider={detectedProvider.key} size={24} />
-              ) : isUrl ? (
-                <LinkIcon size={24} strokeWidth={2.5} />
-              ) : (
-                <Search size={24} strokeWidth={2.5} />
-              )}
-            </motion.div>
+          <div className="absolute inset-y-0 left-6 flex items-center gap-3 z-10">
+            <AnimatePresence mode="wait">
+              {providerBadge}
+            </AnimatePresence>
+            {!detectedProvider && (
+              <div className={isUrl ? "text-blue-500" : "text-gray-400"}>
+                {isUrl ? <LinkIcon size={24} strokeWidth={2.5} /> : <Search size={24} strokeWidth={2.5} />}
+              </div>
+            )}
           </div>
           
           <input
@@ -352,7 +390,7 @@ const URLInput: React.FC = () => {
             onChange={(e) => setUrl(e.target.value)}
             onFocus={() => url && !isUrl && setShowResults(true)}
             placeholder={t('search_placeholder')}
-            className="w-full pl-16 pr-44 py-7 bg-transparent outline-none font-bold text-gray-700 dark:text-white text-lg placeholder:text-gray-300 dark:placeholder:text-gray-600"
+            className={`w-full pl-${detectedProvider ? '44' : '16'} pr-44 py-7 bg-transparent outline-none font-bold text-gray-700 dark:text-white text-lg placeholder:text-gray-300 dark:placeholder:text-gray-600 transition-all duration-300`}
           />
         </div>
 

@@ -80,7 +80,29 @@ class DownloadEngine:
             self._notify("Initialisation du moteur...", progress=2)
 
             self._notify("Récupération des métadonnées du provider...", progress=5)
-            provider = ProviderFactory.get_provider(self.task.original_url)
+            
+            auth_token = None
+            if self.task.user:
+                from api.models import ProviderAuth
+                if "spotify.com" in self.task.original_url:
+                    p_name = 'spotify'
+                elif "deezer.com" in self.task.original_url:
+                    p_name = 'deezer'
+                elif "apple.com" in self.task.original_url:
+                    p_name = 'apple_music'
+                elif "tidal.com" in self.task.original_url:
+                    p_name = 'tidal'
+                elif "youtube.com" in self.task.original_url or "youtu.be" in self.task.original_url:
+                    p_name = 'youtube_music'
+                else:
+                    p_name = None
+                
+                if p_name:
+                    auth_obj = ProviderAuth.objects.filter(user=self.task.user, provider=p_name).first()
+                    if auth_obj:
+                        auth_token = auth_obj.access_token
+
+            provider = ProviderFactory.get_provider(self.task.original_url, auth_token=auth_token)
             metadata = provider.get_track_info_cached(self.task.original_url)
             
             track_meta = None

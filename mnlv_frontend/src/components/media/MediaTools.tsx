@@ -27,6 +27,7 @@ const MediaTools: React.FC = () => {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [mode, setMode] = useState<'convert' | 'tags'>('convert');
   const [targetFormat, setTargetFormat] = useState('WAV');
+  const [inputExt, setInputExt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [metadata, setMetadata] = useState({
@@ -37,15 +38,20 @@ const MediaTools: React.FC = () => {
   });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) setFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      setFile(selectedFile);
+      const ext = selectedFile.name.split('.').pop()?.toUpperCase() || '';
+      setInputExt(ext);
+    }
   };
 
   const FORMATS = [
-    { value: 'WAV', label: 'WAV Professionnel', desc: '44.1kHz / 16-bit PCM' },
-    { value: 'FLAC', label: 'FLAC Studio', desc: 'Lossless Archive' },
-    { value: 'ALAC', label: 'ALAC Apple', desc: 'Apple Lossless' },
-    { value: 'OPUS', label: 'OPUS WebRadio', desc: 'Streaming Latence Basse' },
-    { value: 'AAC', label: 'AAC WebTV', desc: 'Diffusion Standard' },
+    { value: 'WAV', label: 'WAV Professionnel', desc: '44.1kHz / 16-bit PCM', longDesc: 'La conversion WAV transforme vos fichiers compressés en format PCM linéaire haute qualité. Idéal pour le mixage DJ ou la post-production audio.' },
+    { value: 'FLAC', label: 'FLAC Studio', desc: 'Lossless Archive', longDesc: 'Le format FLAC permet une compression sans perte, préservant l\'intégralité des données audio originales tout en réduisant la taille du fichier.' },
+    { value: 'ALAC', label: 'ALAC Apple', desc: 'Apple Lossless', longDesc: 'Format Apple Lossless, idéal pour les utilisateurs de l\'écosystème Apple souhaitant une qualité studio sans compromis.' },
+    { value: 'OPUS', label: 'OPUS WebRadio', desc: 'Streaming Latence Basse', longDesc: 'Opus est le codec le plus efficace pour le streaming en temps réel, offrant une qualité exceptionnelle même à bas débit.' },
+    { value: 'AAC', label: 'AAC WebTV', desc: 'Diffusion Standard', longDesc: 'Format standard pour la diffusion vidéo et WebTV, offrant un excellent compromis entre compatibilité et fidélité audio.' },
   ];
 
   const handleProcess = async () => {
@@ -170,17 +176,35 @@ const MediaTools: React.FC = () => {
                 </div>
 
                 {mode === 'convert' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {FORMATS.map((f) => (
-                      <button
-                        key={f.value}
-                        onClick={() => setTargetFormat(f.value)}
-                        className={`flex flex-col items-start p-5 rounded-[2rem] border-2 transition-all ${targetFormat === f.value ? 'bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-500' : 'bg-gray-50 border-transparent dark:bg-slate-800/50 hover:border-gray-200'}`}
-                      >
-                        <span className={`text-sm font-black ${targetFormat === f.value ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-900 dark:text-white'}`}>{f.label}</span>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase mt-1">{f.desc}</span>
-                      </button>
-                    ))}
+                  <div className="space-y-6">
+                    {file && (
+                      <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800/50 rounded-2xl border border-gray-100 dark:border-slate-800">
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-xs">
+                          {inputExt}
+                        </div>
+                        <ChevronRight size={16} className="text-gray-300" />
+                        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-xs">
+                          {targetFormat}
+                        </div>
+                        <div className="ml-2">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Configuration Flux</p>
+                          <p className="text-xs font-bold text-gray-700 dark:text-white">Conversion {inputExt} vers {targetFormat}</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {FORMATS.map((f) => (
+                        <button
+                          key={f.value}
+                          onClick={() => setTargetFormat(f.value)}
+                          className={`flex flex-col items-start p-5 rounded-[2rem] border-2 transition-all ${targetFormat === f.value ? 'bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-500' : 'bg-gray-50 border-transparent dark:bg-slate-800/50 hover:border-gray-200'}`}
+                        >
+                          <span className={`text-sm font-black ${targetFormat === f.value ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-900 dark:text-white'}`}>{f.label}</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase mt-1">{f.desc}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -229,11 +253,11 @@ const MediaTools: React.FC = () => {
                   </div>
                 )}
 
-                {mode === 'convert' && targetFormat === 'WAV' && (
+                {mode === 'convert' && (
                   <div className="p-8 bg-indigo-50 dark:bg-indigo-900/10 rounded-[2rem] border border-indigo-100 dark:border-indigo-900/30 flex items-start gap-4">
                     <Info className="text-indigo-600 dark:text-indigo-400 mt-1 flex-shrink-0" size={20} />
                     <p className="text-sm text-indigo-900 dark:text-indigo-300 font-medium leading-relaxed">
-                      La conversion WAV transforme vos fichiers compressés en format PCM linéaire haute qualité. Idéal pour le mixage DJ ou la post-production audio.
+                      {FORMATS.find(f => f.value === targetFormat)?.longDesc}
                     </p>
                   </div>
                 )}

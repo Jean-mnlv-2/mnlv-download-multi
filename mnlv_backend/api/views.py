@@ -25,6 +25,10 @@ from core.logger_utils import get_mnlv_logger
 import os
 import requests
 import spotipy
+import urllib.parse
+import hashlib
+import base64
+import secrets
 from spotipy.oauth2 import SpotifyOAuth
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
@@ -268,6 +272,11 @@ class SoundCloudCallbackView(APIView):
             
         try:
             user = User.objects.get(id=user_id)
+            ProviderAuth.objects.update_or_create(
+                user=user,
+                provider='soundcloud',
+                defaults={'access_token': code}
+            )
             return redirect(f'{settings.FRONTEND_URL}/?auth_success=soundcloud')
         except User.DoesNotExist:
             logger.warning(f"SoundCloud callback invalid user_id: {user_id}")
@@ -275,6 +284,34 @@ class SoundCloudCallbackView(APIView):
         except Exception as e:
             logger.exception(f"SoundCloud callback error: {e}")
             return redirect(f'{settings.FRONTEND_URL}/?auth_error=soundcloud&reason=unknown')
+
+class YouTubeMusicConnectView(APIView):
+    """
+    Endpoint POST /api/auth/providers/youtube-music/connect/
+    Permet de connecter YouTube Music en fournissant soit une clé API v3, 
+    soit les headers d'authentification ytmusicapi.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        auth_data = request.data.get('auth_data')
+        if not auth_data:
+            return Response({"error": "Données d'authentification manquantes"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            ProviderAuth.objects.update_or_create(
+                user=request.user,
+                provider='youtube_music',
+                defaults={
+                    'access_token': auth_data,
+                    'updated_at': timezone.now()
+                }
+            )
+            logger.info(f"YouTube Music connected for user {request.user.id}")
+            return Response({"message": "YouTube Music connecté avec succès"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception(f"Error connecting YouTube Music: {e}")
+            return Response({"error": "Erreur lors de la connexion"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class AmazonMusicLoginView(APIView):
     """
@@ -288,47 +325,113 @@ class AmazonMusicLoginView(APIView):
 class TidalLoginView(APIView):
     """
     Endpoint GET /api/auth/providers/tidal/login/
+    Initie le flux d'authentification Tidal avec PKCE.
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        client_id = getattr(settings, 'TIDAL_CLIENT_ID', None)
+        client_id = settings.TIDAL_CLIENT_ID
         if not client_id:
             return Response({"error": "Tidal Client ID non configuré"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        backend_callback = f"{settings.BACKEND_URL.rstrip('/')}/api/auth/providers/tidal/callback/"
-        auth_url = f"https://login.tidal.com/authorize?client_id={client_id}&redirect_uri={backend_callback}&response_type=code&scope=playlists.edit&state={request.user.id}"
         
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge_hash = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        code_challenge = base64.urlsafe_b64encode(code_challenge_hash).decode('utf-8').replace('=', '')
+        
+        request.session['tidal_code_verifier'] = code_verifier
+        request.session.modified = True
+        
+        params = {
+            'client_id': client_id,
+            'redirect_uri': settings.TIDAL_REDIRECT_URI,
+            'response_type': 'code',
+            'scope': 'user.read playlists.read playlists.write collection.read',
+            'state': str(request.user.id),
+            'code_challenge': code_challenge,
+            'code_challenge_method': 'S256'
+        }
+        
+        auth_url = f"https://login.tidal.com/authorize?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
+        
+        logger.info(f"Tidal PKCE auth URL generated for user {request.user.id}")
         return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
 
 class TidalCallbackView(APIView):
     """
     Endpoint GET /api/auth/providers/tidal/callback/
+    Gère le retour de Tidal après autorisation en validant le PKCE.
     """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        error = request.GET.get('error')
         code = request.GET.get('code')
         user_id = request.GET.get('state')
-        
+        error = request.GET.get('error')
+        error_desc = request.GET.get('error_description')
+
         if error:
-            logger.warning(f"Tidal callback error: {error}")
+            logger.warning(f"Tidal callback error: {error} - {error_desc}")
             return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason={error}')
 
         if not code or not user_id:
-            logger.warning(f"Tidal callback missing code or state: code={code}, state={user_id}")
-            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=missing_parameters')
-            
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=missing_params')
+
         try:
             user = User.objects.get(id=user_id)
+            
+            code_verifier = request.session.get('tidal_code_verifier')
+            
+            # Échange du code contre un token
+            token_url = "https://login.tidal.com/oauth2/token"
+            
+            auth = (settings.TIDAL_CLIENT_ID, settings.TIDAL_CLIENT_SECRET)
+            data = {
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': settings.TIDAL_REDIRECT_URI,
+                'client_id': settings.TIDAL_CLIENT_ID,
+            }
+            
+            if code_verifier:
+                data['code_verifier'] = code_verifier
+            
+            logger.info(f"Attempting Tidal PKCE token exchange for user {user_id}")
+            
+            response = requests.post(token_url, data=data, auth=auth)
+            
+            if response.status_code != 200:
+                logger.error(f"Tidal token exchange error {response.status_code}: {response.text}")
+                data['client_secret'] = settings.TIDAL_CLIENT_SECRET
+                response = requests.post(token_url, data=data)
+                
+            token_data = response.json()
+            
+            if 'access_token' not in token_data:
+                logger.error(f"Tidal token exchange failed: {token_data}")
+                return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=token_exchange_failed')
+
+            # Nettoyage de la session
+            if 'tidal_code_verifier' in request.session:
+                del request.session['tidal_code_verifier']
+
+            with transaction.atomic():
+                ProviderAuth.objects.update_or_create(
+                    user=user,
+                    provider='tidal',
+                    defaults={
+                        'access_token': token_data['access_token'],
+                        'refresh_token': token_data.get('refresh_token'),
+                        'expires_at': timezone.now() + timedelta(seconds=int(token_data.get('expires_in', 3600)))
+                    }
+                )
+            
+            logger.info(f"Tidal PKCE auth successful for user {user_id}")
             return redirect(f'{settings.FRONTEND_URL}/?auth_success=tidal')
-        except User.DoesNotExist:
-            logger.warning(f"Tidal callback invalid user_id: {user_id}")
-            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=invalid_user')
+            
         except Exception as e:
-            logger.exception(f"Tidal callback error: {e}")
-            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=unknown')
+            logger.exception(f"Error in Tidal PKCE callback: {e}")
+            return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=internal_error')
+
 
 class AppleMusicTokenView(APIView):
     """
@@ -721,6 +824,30 @@ class BulkCancelTasksView(APIView):
             logger.exception(f"Error in BulkCancelTasksView: {e}")
             return Response({"error": "Erreur lors de l'annulation des tâches"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class BulkClearHistoryView(APIView):
+    """
+    Endpoint POST /api/tasks/clear-history/
+    Supprime définitivement les tâches terminées ou échouées de l'historique de l'utilisateur.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            deleted_count, _ = DownloadTask.objects.filter(
+                user=request.user,
+                status__in=[DownloadTask.Status.COMPLETED, DownloadTask.Status.FAILED]
+            ).delete()
+            
+            logger.info(f"Bulk clear history: {deleted_count} tasks deleted for user {request.user.id}")
+            return Response({
+                "status": "success",
+                "message": f"Historique vidé : {deleted_count} tâches supprimées.",
+                "deleted_count": deleted_count
+            })
+        except Exception as e:
+            logger.exception(f"Error in BulkClearHistoryView: {e}")
+            return Response({"error": "Erreur lors de la suppression de l'historique"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class BulkDownloadView(StandardizedErrorMixin, APIView):
     """
     Endpoint POST /api/download/bulk/
@@ -875,6 +1002,7 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
             'spotify' if 'spotify.com' in provider_url else
             'deezer' if 'deezer.com' in provider_url else
             'apple_music' if 'apple.com' in provider_url else
+            'youtube_music' if 'youtube.com' in provider_url or 'youtube_music.com' in provider_url else
             'boomplay' if 'boomplay.com' in provider_url or 'boomplaymusic.com' in provider_url else
             None
         )
@@ -1040,6 +1168,13 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
                             
                     logger.info(f"Library items (playlists/audiobooks) retrieved for user {request.user.id}")
                     return Response({"status": "success", "playlists": items}, status=status.HTTP_200_OK)
+                except NotImplementedError as e:
+                    logger.debug(f"Action GET_LIST not supported for {provider_name}: {e}")
+                    return Response({
+                        "status": "unsupported", 
+                        "playlists": [], 
+                        "message": str(e)
+                    }, status=status.HTTP_200_OK)
                 except Exception as e:
                     if "403" in str(e) and "not registered" in str(e):
                         return self.error_response(

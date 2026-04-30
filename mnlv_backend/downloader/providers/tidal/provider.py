@@ -24,20 +24,32 @@ class TidalProvider(MusicProvider):
     def session(self):
         if self._session is None:
             self._session = tidalapi.Session()
-            if self.auth_token:
-                self._session.load_oauth_session(
-                    token_type=settings.TIDAL_TOKEN_TYPE,
-                    access_token=self.auth_token,
-                    refresh_token=settings.TIDAL_REFRESH_TOKEN,
-                    expiry=settings.TIDAL_EXPIRY
-                )
-            else:
-                self._session.load_oauth_session(
-                    token_type=settings.TIDAL_TOKEN_TYPE,
-                    access_token=settings.TIDAL_ACCESS_TOKEN,
-                    refresh_token=settings.TIDAL_REFRESH_TOKEN,
-                    expiry=settings.TIDAL_EXPIRY
-                )
+            
+            client_id = settings.TIDAL_CLIENT_ID
+            client_secret = settings.TIDAL_CLIENT_SECRET
+            
+            if self.auth_token and "votre_token" not in self.auth_token:
+                try:
+                    self._session.load_oauth_session(
+                        token_type=settings.TIDAL_TOKEN_TYPE,
+                        access_token=self.auth_token,
+                        refresh_token=settings.TIDAL_REFRESH_TOKEN,
+                        expiry=settings.TIDAL_EXPIRY
+                    )
+                except Exception:
+                    pass
+            
+            if not self._session.check_login() and settings.TIDAL_ACCESS_TOKEN and "votre_token" not in settings.TIDAL_ACCESS_TOKEN:
+                try:
+                    self._session.load_oauth_session(
+                        token_type=settings.TIDAL_TOKEN_TYPE,
+                        access_token=settings.TIDAL_ACCESS_TOKEN,
+                        refresh_token=settings.TIDAL_REFRESH_TOKEN,
+                        expiry=settings.TIDAL_EXPIRY
+                    )
+                except Exception:
+                    pass
+                    
         return self._session
 
     def create_playlist(self, name: str, description: str = "", public: bool = False) -> str:
@@ -90,6 +102,27 @@ class TidalProvider(MusicProvider):
                 tracks.append(self._map_track(track))
                 
         return tracks
+
+    def get_user_playlists(self) -> List[dict]:
+        """Récupère les playlists de l'utilisateur connecté sur Tidal"""
+        if not self.session.check_login():
+            return []
+            
+        try:
+            user_id = self.session.user.id
+            playlists = self.session.user.playlists()
+            return [
+                {
+                    'id': p.id,
+                    'name': p.name,
+                    'track_count': p.num_tracks,
+                    'provider': 'tidal'
+                }
+                for p in playlists
+            ]
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des playlists Tidal: {e}")
+            return []
 
     def _extract_id(self, url: str, type_name: str) -> str:
         """Extrait l'ID de l'URL Tidal"""

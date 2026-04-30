@@ -85,7 +85,7 @@ class PlaylistManagementSerializer(serializers.Serializer):
     """
     Sérialiseur pour la gestion des playlists (création/ajout).
     """
-    provider_url = serializers.URLField(required=True, help_text="URL du provider (ex: spotify.com)")
+    provider_url = serializers.CharField(required=True, help_text="URL du provider (ex: music.youtube.com)")
     name = serializers.CharField(required=False, max_length=255)
     description = serializers.CharField(required=False, allow_blank=True)
     track_urls = serializers.ListField(

@@ -148,8 +148,10 @@ const App: React.FC = () => {
       } else if (authError) {
         let message = `Erreur lors de la connexion ${authError}`;
         if (reason === 'access_denied') message = "Connexion refusée par l'utilisateur.";
-        else if (reason === 'invalid_scope') message = "Configuration des permissions invalide.";
+        else if (reason === 'invalid_scope') message = "Permissions (scopes) invalides ou non autorisées.";
+        else if (reason === 'invalid_request') message = "Requête invalide (vérifiez votre Redirect URI).";
         else if (reason === 'missing_parameters') message = "Paramètres de connexion manquants.";
+        else if (reason) message = `Erreur : ${reason}`;
         
         addNotification('error', message);
         window.history.replaceState({}, document.title, window.location.pathname);

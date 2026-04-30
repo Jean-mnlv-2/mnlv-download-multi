@@ -8,10 +8,10 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-mnlv-fallback-key-2026')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+SECRET_KEY = os.getenv('SECRET_KEY')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,api').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
     'daphne',
@@ -214,20 +214,23 @@ LOGGING = {
 # Configuration des Providers
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
-SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8002/api/auth/providers/spotify/callback/')
-SPOTIFY_ADS_API_BASE = os.getenv('SPOTIFY_ADS_API_BASE', 'https://api-partner.spotify.com/ads/v3')
-SPOTIFY_ADS_SCOPE = os.getenv('SPOTIFY_ADS_SCOPE', 'playlist-modify-public playlist-modify-private playlist-read-private user-library-read')
+SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI')
+SPOTIFY_ADS_API_BASE = os.getenv('SPOTIFY_ADS_API_BASE')
+SPOTIFY_ADS_SCOPE = os.getenv('SPOTIFY_ADS_SCOPE')
 
 DEEZER_APP_ID = os.getenv('DEEZER_APP_ID')
 DEEZER_SECRET_KEY = os.getenv('DEEZER_SECRET_KEY')
-DEEZER_API_BASE = os.getenv('DEEZER_API_BASE', 'https://api.deezer.com')
+DEEZER_API_BASE = os.getenv('DEEZER_API_BASE')
 
 APPLE_MUSIC_TEAM_ID = os.getenv('APPLE_MUSIC_TEAM_ID')
 APPLE_MUSIC_KEY_ID = os.getenv('APPLE_MUSIC_KEY_ID')
 APPLE_MUSIC_SECRET_KEY = os.getenv('APPLE_MUSIC_SECRET_KEY')
-APPLE_MUSIC_API_BASE = os.getenv('APPLE_MUSIC_API_BASE', 'https://api.music.apple.com/v1')
+APPLE_MUSIC_API_BASE = os.getenv('APPLE_MUSIC_API_BASE')
 
 # Tidal Configuration
+TIDAL_CLIENT_ID = os.getenv('TIDAL_CLIENT_ID')
+TIDAL_CLIENT_SECRET = os.getenv('TIDAL_CLIENT_SECRET')
+TIDAL_REDIRECT_URI = os.getenv('TIDAL_REDIRECT_URI')
 TIDAL_TOKEN_TYPE = os.getenv('TIDAL_TOKEN_TYPE', 'Bearer')
 TIDAL_ACCESS_TOKEN = os.getenv('TIDAL_ACCESS_TOKEN')
 TIDAL_REFRESH_TOKEN = os.getenv('TIDAL_REFRESH_TOKEN')
@@ -238,8 +241,8 @@ BOOMPLAY_APP_ID = os.getenv('BOOMPLAY_APP_ID')
 BOOMPLAY_ACCESS_TOKEN = os.getenv('BOOMPLAY_ACCESS_TOKEN')
 BOOMPLAY_API_BASE = os.getenv('BOOMPLAY_API_BASE', 'https://openapi.boomplay.com')
 
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3003')
-BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:8002')
+FRONTEND_URL = os.getenv('FRONTEND_URL')
+BACKEND_URL = os.getenv('BACKEND_URL')
 
 CELERY_BEAT_SCHEDULE = {
     'cleanup-old-files-every-30m': {

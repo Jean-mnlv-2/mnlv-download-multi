@@ -118,23 +118,40 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    
+    if (error.response?.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/api/auth/refresh/')) {
       originalRequest._retry = true;
       const refreshToken = localStorage.getItem('mnlv_refresh_token');
+      
       if (refreshToken) {
         try {
           const response = await axios.post('/api/auth/refresh/', { refresh: refreshToken });
-          const { access } = response.data;
+          const { access, refresh } = response.data;
+          
           localStorage.setItem('mnlv_access_token', access);
+          if (refresh) {
+            localStorage.setItem('mnlv_refresh_token', refresh);
+          }
+          
           originalRequest.headers.Authorization = `Bearer ${access}`;
           return axios(originalRequest);
         } catch (refreshError) {
           localStorage.removeItem('mnlv_access_token');
           localStorage.removeItem('mnlv_refresh_token');
+          useAuthStore.getState().logout();
           window.location.href = '/';
+          return Promise.reject(refreshError);
         }
       }
     }
+    
+    if (error.response?.status === 401 && originalRequest.url?.includes('/api/auth/refresh/')) {
+      localStorage.removeItem('mnlv_access_token');
+      localStorage.removeItem('mnlv_refresh_token');
+      useAuthStore.getState().logout();
+      window.location.href = '/';
+    }
+
     return Promise.reject(error);
   }
 );

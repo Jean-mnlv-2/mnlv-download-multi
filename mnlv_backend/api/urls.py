@@ -10,6 +10,7 @@ from .views import (
     BulkCancelTasksView,
     DownloadTaskStatusView, 
     DownloadFileView,
+    BulkClearHistoryView,
     HealthCheckView,
     RegisterView,
     UserProfileView,
@@ -31,7 +32,8 @@ from .views import (
     DeezerFlowView,
     DeezerFavoritesView,
     DeezerSearchView,
-    DeezerChartsView
+    DeezerChartsView,
+    YouTubeMusicConnectView
 )
 from csv_handler.views import CSVUploadView, PendingUploadsView
 from media_tools.views import MediaConvertView, MediaEditTagsView
@@ -58,6 +60,7 @@ urlpatterns = [
     path('auth/providers/deezer/callback/', DeezerCallbackView.as_view(), name='deezer_callback'),
     path('auth/providers/soundcloud/login/', SoundCloudLoginView.as_view(), name='soundcloud_login'),
     path('auth/providers/soundcloud/callback/', SoundCloudCallbackView.as_view(), name='soundcloud_callback'),
+    path('auth/providers/youtube-music/connect/', YouTubeMusicConnectView.as_view(), name='youtube_music_connect'),
     path('auth/providers/amazon-music/login/', AmazonMusicLoginView.as_view(), name='amazon_music_login'),
     path('auth/providers/tidal/login/', TidalLoginView.as_view(), name='tidal_login'),
     path('auth/providers/tidal/callback/', TidalCallbackView.as_view(), name='tidal_callback'),
@@ -72,6 +75,7 @@ urlpatterns = [
     path('tasks/history/', DownloadTaskListView.as_view(), name='tasks_history'),
     path('tasks/cancel-all/', BulkCancelTasksView.as_view(), name='tasks_cancel_all'),
     path('task/<uuid:id>/status/', DownloadTaskStatusView.as_view(), name='task_status'),
+    path('tasks/clear-history/', BulkClearHistoryView.as_view(), name='tasks_clear_history'),
     path('task/<uuid:task_id>/download/', DownloadFileView.as_view(), name='task_download'),
 
     # Playlists Management

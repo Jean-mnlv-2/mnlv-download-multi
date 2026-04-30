@@ -247,16 +247,24 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }, 2000);
   },
 
-  clearCompleted: () => {
-    set((state) => {
-      const newTasks = { ...state.tasks };
-      Object.keys(newTasks).forEach(id => {
-        if (newTasks[id].status === 'COMPLETED' || newTasks[id].status === 'FAILED') {
-          delete newTasks[id];
-        }
-      });
-      return { tasks: newTasks, history: [] };
-    });
+  clearCompleted: async () => {
+    try {
+      const response = await axios.post('/api/tasks/clear-history/');
+      if (response.data.status === 'success') {
+        get().addNotification('success', response.data.message);
+        set((state) => {
+          const newTasks = { ...state.tasks };
+          Object.keys(newTasks).forEach(id => {
+            if (newTasks[id].status === 'COMPLETED' || newTasks[id].status === 'FAILED') {
+              delete newTasks[id];
+            }
+          });
+          return { tasks: newTasks, history: [] };
+        });
+      }
+    } catch (error) {
+      get().addNotification('error', "Échec du vidage de l'historique");
+    }
   },
 
   addNotification: (type, message) => {
