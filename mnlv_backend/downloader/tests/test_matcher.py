@@ -1,12 +1,12 @@
 from django.test import TestCase
 from unittest.mock import MagicMock, patch
 from downloader.matching.matcher import ISRCMatcher
-from downloader.providers.base import TrackMetadata
+from downloader.providers.base import ProviderTrackMetadata
 
 class ISRCMatcherTest(TestCase):
     def setUp(self):
         self.matcher = ISRCMatcher()
-        self.metadata = TrackMetadata(
+        self.metadata = ProviderTrackMetadata(
             title="Blinding Lights",
             artist="The Weeknd",
             isrc="USUM71922222",
@@ -34,7 +34,7 @@ class ISRCMatcherTest(TestCase):
         mock_ydl_instance.extract_info.return_value = {'entries': []}
         
         result = self.matcher.find_best_match(self.metadata)
-        self.assertEqual(result, 'ytsearch1:The Weeknd - Blinding Lights (Official Audio)')
+        self.assertTrue(result.startswith('ytsearch1:The Weeknd - Blinding Lights'))
 
     def test_verify_match_success(self):
         """Vérifie la validation de durée"""

@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import requests
 import logging
@@ -55,7 +55,7 @@ class BoomplayProvider(MusicProvider):
         """Vérifie si l'URL appartient à Boomplay"""
         return bool(re.search(r"boomplay(music)?\.com", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre Boomplay"""
         track_id = self._extract_id(url, r"songs?")
         data = self._get(f"track/v1/id/{track_id}")
@@ -67,7 +67,7 @@ class BoomplayProvider(MusicProvider):
 
         return self._map_track(track_data, url)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait les titres d'une playlist ou d'un album Boomplay"""
         tracks = []
         if "/playlist" in url:
@@ -146,7 +146,7 @@ class BoomplayProvider(MusicProvider):
             return match.group(1)
         raise ValueError(f"ID Boomplay non trouvé pour le type {type_name} dans l'URL : {url}")
 
-    def _map_track(self, data: dict, original_url: Optional[str] = None) -> TrackMetadata:
+    def _map_track(self, data: dict, original_url: Optional[str] = None) -> ProviderTrackMetadata:
         """Mappe les données JSON de Boomplay vers TrackMetadata"""
         artists = data.get('artists', [])
         artist_name = ", ".join([a.get('artist_name', '') for a in artists]) if artists else "Unknown Artist"
@@ -166,7 +166,7 @@ class BoomplayProvider(MusicProvider):
         except (ValueError, IndexError):
             pass
 
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=data.get('track_title', 'Unknown Title'),
             artist=artist_name,
             album=data.get('album_title'),

@@ -40,7 +40,7 @@ class DownloadTaskSerializer(serializers.ModelSerializer):
         model = DownloadTask
         fields = [
             'id', 'original_url', 'provider', 'status', 'progress', 
-            'media_type', 'quality', 'result_file', 'result_file_url', 'error_message', 
+            'media_type', 'quality', 'result_file', 'result_file_url', 'error_message', 'error_code',
             'track', 'created_at', 'updated_at'
         ]
     

@@ -2,6 +2,7 @@ import os
 import shutil
 import time
 from datetime import timedelta
+from pathlib import Path
 from django.utils import timezone
 from django.conf import settings
 from celery import shared_task
@@ -15,7 +16,8 @@ logger = get_task_logger(__name__)
     bind=True,
     max_retries=3,
     default_retry_delay=60,
-    queue='high_priority'
+    queue='high_priority',
+    rate_limit=os.getenv("DOWNLOAD_RATE_LIMIT_HIGH", None) or None,
 )
 def process_single_track(self, task_id: str):
     """
@@ -32,7 +34,8 @@ def process_single_track(self, task_id: str):
 @shared_task(
     bind=True,
     max_retries=2,
-    queue='low_priority'
+    queue='low_priority',
+    rate_limit=os.getenv("DOWNLOAD_RATE_LIMIT_LOW", None) or None,
 )
 def process_playlist_item(self, task_id: str):
     """

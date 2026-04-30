@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import requests
 import logging
@@ -82,7 +82,7 @@ class AppleMusicProvider(MusicProvider):
     def supports_url(self, url: str) -> bool:
         """Vérifie si l'URL est de type music.apple.com"""
         return bool(re.search(r"music\.apple\.com", url))
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un clip Apple Music avec 'extend' pour plus de détails"""
         try:
             track_id = self._extract_id(url)
@@ -94,7 +94,8 @@ class AppleMusicProvider(MusicProvider):
             response = requests.get(
                 f"{self.base_url}/catalog/{storefront}/{resource_type}/{track_id}", 
                 headers=self._get_headers(),
-                params=params
+                params=params,
+                timeout=15,
             )
             response.raise_for_status()
             results = response.json()
@@ -109,7 +110,7 @@ class AppleMusicProvider(MusicProvider):
         except Exception as e:
             self._handle_api_error(e)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres et clips d'une playlist ou d'un album avec pagination optimisée (limit=100)"""
         tracks = []
         item_id = self._extract_id(url)
@@ -126,7 +127,8 @@ class AppleMusicProvider(MusicProvider):
             response = requests.get(
                 f"{self.base_url}/catalog/{storefront}/{resource_type}/{item_id}",
                 headers=self._get_headers(),
-                params=params
+                params=params,
+                timeout=15,
             )
             response.raise_for_status()
             results = response.json()
@@ -149,7 +151,7 @@ class AppleMusicProvider(MusicProvider):
                         sep = "&" if "?" in full_next_url else "?"
                         full_next_url += f"{sep}limit=100"
                         
-                    response = requests.get(full_next_url, headers=self._get_headers())
+                    response = requests.get(full_next_url, headers=self._get_headers(), timeout=15)
                     response.raise_for_status()
                     current_data = response.json()
                 else:
@@ -171,7 +173,7 @@ class AppleMusicProvider(MusicProvider):
         
         try:
             while url:
-                response = requests.get(url, headers=self._get_headers(), params=params)
+                response = requests.get(url, headers=self._get_headers(), params=params, timeout=15)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -207,7 +209,7 @@ class AppleMusicProvider(MusicProvider):
             
         return playlists
 
-    def get_tracks_by_ids(self, ids: List[str], storefront: str = "us") -> List[TrackMetadata]:
+    def get_tracks_by_ids(self, ids: List[str], storefront: str = "us") -> List[ProviderTrackMetadata]:
         """Récupère plusieurs titres ou clips en une seule requête (Batch Request) - Max 25 IDs"""
         if not ids:
             return []
@@ -217,7 +219,7 @@ class AppleMusicProvider(MusicProvider):
         params = {"ids": ",".join(batch_ids), "extend": "isrc"}
         
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            response = requests.get(url, headers=self._get_headers(), params=params, timeout=15)
             response.raise_for_status()
             data = response.json()
             
@@ -244,7 +246,7 @@ class AppleMusicProvider(MusicProvider):
         }
 
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            response = requests.get(url, headers=self._get_headers(), params=params, timeout=15)
             response.raise_for_status()
             results = response.json().get('results', {})
             
@@ -292,7 +294,7 @@ class AppleMusicProvider(MusicProvider):
         }
 
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            response = requests.get(url, headers=self._get_headers(), params=params, timeout=15)
             response.raise_for_status()
             results = response.json().get('results', {})
             
@@ -333,7 +335,7 @@ class AppleMusicProvider(MusicProvider):
         }
         
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=15)
             response.raise_for_status()
             data = response.json()
             return data['data'][0]['id']
@@ -359,7 +361,7 @@ class AppleMusicProvider(MusicProvider):
         payload = {"data": tracks_data}
         
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=15)
             response.raise_for_status()
             return "success"
         except Exception as e:
@@ -381,7 +383,7 @@ class AppleMusicProvider(MusicProvider):
         match = re.search(r"apple\.com/([^/]+)/", url)
         return match.group(1) if match else "us"
 
-    def _map_track(self, attrs: dict, url: str, is_video: bool = False) -> TrackMetadata:
+    def _map_track(self, attrs: dict, url: str, is_video: bool = False) -> ProviderTrackMetadata:
         """Mappe les attributs Apple Music vers TrackMetadata avec enrichissement"""
         artwork_url = attrs.get('artwork', {}).get('url', '')
         if artwork_url:
@@ -389,7 +391,7 @@ class AppleMusicProvider(MusicProvider):
         
         isrc = attrs.get('isrc')
         
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=attrs.get('name', 'Titre inconnu'),
             artist=attrs.get('artistName', 'Artiste inconnu'),
             album=attrs.get('albumName'),

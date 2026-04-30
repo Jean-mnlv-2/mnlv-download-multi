@@ -49,6 +49,7 @@ class DownloadTask(models.Model):
     explicit_filter = models.BooleanField(default=False) # Si True, ignore les titres explicites
     result_file = models.FileField(upload_to='downloads/', null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
+    error_code = models.CharField(max_length=50, null=True, blank=True)
     
     track = models.ForeignKey(TrackMetadata, on_delete=models.SET_NULL, null=True, blank=True)
     
@@ -58,38 +59,3 @@ class DownloadTask(models.Model):
 
     def __str__(self):
         return f"Task {self.id} - {self.status}"
-
-    def save(self, *args, **kwargs):
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
-        
-        is_new = self._state.adding
-        super().save(*args, **kwargs)
-        
-        if self.user:
-            channel_layer = get_channel_layer()
-            group_name = f"user_{self.user.id}_tasks"
-            
-            track_data = None
-            if self.track:
-                track_data = {
-                    "title": self.track.title,
-                    "artist": self.track.artist,
-                    "album": self.track.album,
-                    "cover_url": self.track.cover_url
-                }
-
-            async_to_sync(channel_layer.group_send)(
-                group_name,
-                {
-                    "type": "task_update",
-                    "data": {
-                        "task_id": str(self.id),
-                        "status": self.status,
-                        "progress": self.progress,
-                        "error": self.error_message,
-                        "result_file": self.result_file.url if self.result_file else None,
-                        "track": track_data
-                    }
-                }
-            )

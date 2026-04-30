@@ -1,5 +1,5 @@
 from typing import List, Optional
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import requests
 from typing import List
@@ -16,12 +16,12 @@ class AmazonMusicProvider(MusicProvider):
         """Vérifie si l'URL est de type music.amazon.com"""
         return bool(re.search(r"music\.amazon", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre Amazon Music via scraping"""
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=15)
         html = response.text
 
         # Scraping basique via Regex (Amazon utilise souvent du JSON dans le HTML)
@@ -30,7 +30,7 @@ class AmazonMusicProvider(MusicProvider):
         album = re.search(r'"albumName":"(.*?)"', html)
         cover = re.search(r'"image":"(.*?)"', html)
 
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=title.group(1) if title else "Titre inconnu",
             artist=artist.group(1) if artist else "Artiste inconnu",
             album=album.group(1) if album else None,
@@ -39,7 +39,7 @@ class AmazonMusicProvider(MusicProvider):
             original_url=url
         )
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres d'une playlist Amazon Music (MVP: limité au track principal)"""
         # Le scraping de playlist Amazon est complexe sans API. 
         # Pour le MVP, on traite comme un titre unique ou on lève une erreur.

@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 try:
     import tidalapi
@@ -80,13 +80,13 @@ class TidalProvider(MusicProvider):
         """Vérifie si l'URL est de type tidal.com"""
         return bool(re.search(r"tidal\.com", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre Tidal"""
         track_id = self._extract_id(url, "track")
         track = self.session.track(track_id)
         return self._map_track(track)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres d'une playlist ou d'un album Tidal"""
         tracks = []
         if "/playlist/" in url:
@@ -131,9 +131,9 @@ class TidalProvider(MusicProvider):
             return match.group(1)
         raise ValueError(f"ID Tidal introuvable dans l'URL : {url}")
 
-    def _map_track(self, track) -> TrackMetadata:
+    def _map_track(self, track) -> ProviderTrackMetadata:
         """Mappe un objet tidalapi.Track vers TrackMetadata"""
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=track.name,
             artist=", ".join([a.name for a in track.artists]),
             album=track.album.name if track.album else None,

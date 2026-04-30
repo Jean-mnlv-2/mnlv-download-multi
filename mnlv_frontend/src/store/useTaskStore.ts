@@ -55,6 +55,7 @@ interface TaskStore {
   connectWebSocket: (token: string) => void;
   autoSaveToLocal: (taskId: string, taskData?: Task) => Promise<void>;
   cancelAllTasks: () => Promise<void>;
+  isWebSocketConnected: boolean;
 }
 
 const STORAGE_KEY = 'mnlv_history_v2';
@@ -66,6 +67,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   refreshTrigger: 0,
   stagedTracks: [],
   localDirectorySelected: !!LocalFileSystemService.getHandle(),
+  isWebSocketConnected: false,
 
   setLocalDirectorySelected: (selected) => set({ localDirectorySelected: selected }),
   setStagedTracks: (tracks) => set({ stagedTracks: tracks }),
@@ -154,6 +156,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${protocol}://${window.location.host}/ws/tasks/?token=${token}`;
     const socket = new WebSocket(wsUrl);
+    let reconnectAttempts = 0;
+
+    socket.onopen = () => {
+      reconnectAttempts = 0;
+      set({ isWebSocketConnected: true });
+    };
 
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -162,8 +170,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           status: data.status,
           progress: data.progress,
           message: data.message,
-          error_message: data.error,
-          result_file_url: data.result_file,
+          error_message: data.error_message || data.error,
+          result_file_url: data.result_file_url || data.result_file,
           speed: data.speed,
           eta: data.eta,
           track: data.track
@@ -172,7 +180,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     };
 
     socket.onclose = () => {
-      setTimeout(() => get().connectWebSocket(token), 5000);
+      set({ isWebSocketConnected: false });
+      // backoff simple (max ~60s)
+      reconnectAttempts += 1;
+      const delay = Math.min(60000, 1000 * Math.pow(2, reconnectAttempts));
+      setTimeout(() => {
+        const currentToken = localStorage.getItem('mnlv_access_token');
+        if (currentToken) get().connectWebSocket(currentToken);
+      }, delay);
     };
   },
   
@@ -191,6 +206,21 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       if (!task) return state;
 
       const updatedTask = { ...task, ...updates };
+
+      // Dédup pour éviter re-render si rien n'a changé
+      const keysToCompare: (keyof Task)[] = [
+        'status',
+        'progress',
+        'message',
+        'error_message',
+        'result_file',
+        'result_file_url',
+        'speed',
+        'eta'
+      ];
+      const changed = keysToCompare.some((k) => task[k] !== updatedTask[k]);
+      const trackChanged = updates.track !== undefined && JSON.stringify(task.track) !== JSON.stringify(updatedTask.track);
+      if (!changed && !trackChanged) return state;
       
       if (updates.status === 'COMPLETED' && task.status !== 'COMPLETED') {
         const name = updatedTask.track ? `${updatedTask.track.title} - ${updatedTask.track.artist}` : 'Fichier';
@@ -223,8 +253,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   pollTaskStatus: (taskId) => {
-    const interval = setInterval(async () => {
+    let delayMs = 2000;
+    const poll = async () => {
       try {
+        const current = get().tasks[taskId];
+        if (current && (current.status === 'COMPLETED' || current.status === 'FAILED')) {
+          return;
+        }
+
+        // polling uniquement si websocket déconnecté
+        if (get().isWebSocketConnected) {
+          return;
+        }
+
         const response = await axios.get(`/api/task/${taskId}/status/`);
         const taskData = response.data;
         
@@ -238,13 +279,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         });
 
         if (taskData.status === 'COMPLETED' || taskData.status === 'FAILED') {
-          clearInterval(interval);
+          return;
         }
       } catch (error) {
         get().updateTask(taskId, { status: 'FAILED', error_message: 'Erreur de connexion au serveur' });
-        clearInterval(interval);
+        return;
       }
-    }, 2000);
+      // backoff quand tout va bien, pour réduire la charge
+      delayMs = Math.min(8000, delayMs * 2);
+      setTimeout(poll, delayMs);
+    };
+    setTimeout(poll, delayMs);
   },
 
   clearCompleted: async () => {

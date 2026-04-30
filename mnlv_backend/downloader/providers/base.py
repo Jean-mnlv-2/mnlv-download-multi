@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 @dataclass
-class TrackMetadata:
+class ProviderTrackMetadata:
     title: str
     artist: str
     album: Optional[str] = None
@@ -24,7 +24,7 @@ class TrackMetadata:
     original_url: Optional[str] = None
 
 class MusicProvider(ABC):
-    def get_track_info_cached(self, url: str) -> TrackMetadata:
+    def get_track_info_cached(self, url: str) -> ProviderTrackMetadata:
         """
         Version avec cache de get_track_info.
         Évite de solliciter inutilement les APIs externes pour les mêmes URLs.
@@ -34,7 +34,7 @@ class MusicProvider(ABC):
         
         if cached_data:
             logger.debug(f"Cache HIT pour {url}")
-            return TrackMetadata(**cached_data)
+            return ProviderTrackMetadata(**cached_data)
         
         logger.debug(f"Cache MISS pour {url}")
         metadata = self.get_track_info(url)
@@ -44,12 +44,12 @@ class MusicProvider(ABC):
         return metadata
 
     @abstractmethod
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait titre, artiste, album, ISRC, cover_url depuis l'URL fournie (track)"""
         pass
 
     @abstractmethod
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des tracks d'une playlist/album"""
         pass
 

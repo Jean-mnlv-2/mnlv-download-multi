@@ -751,6 +751,28 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
                 if explicit_filter and getattr(track_info, 'explicit', False):
                     return self.error_response("Ce titre est explicite et votre filtre est activé.")
 
+                existing = DownloadTask.objects.filter(
+                    user=request.user,
+                    original_url=url,
+                    media_type=media_type,
+                    prefer_video=prefer_video,
+                    quality=quality,
+                    explicit_filter=explicit_filter,
+                    status__in=[DownloadTask.Status.PENDING, DownloadTask.Status.PROCESSING],
+                ).order_by("-created_at").first()
+
+                if existing:
+                    logger.info(f"Dedup: reuse task {existing.id} for user {request.user.id}")
+                    return Response({
+                        "status": "success",
+                        "type": "track",
+                        "task_id": str(existing.id),
+                        "task_status": existing.status,
+                        "provider": existing.provider,
+                        "title": track_info.title,
+                        "dedup": True,
+                    }, status=status.HTTP_200_OK)
+
                 task = DownloadTask.objects.create(
                     user=request.user,
                     original_url=url,
@@ -865,11 +887,30 @@ class BulkDownloadView(StandardizedErrorMixin, APIView):
             return self.error_response("Aucune URL fournie")
 
         tasks_to_create = []
+        dedup_tasks_info = []
         for url in urls[:500]:
             provider_name = 'unknown'
             if 'spotify.com' in url: provider_name = 'spotify'
             elif 'deezer.com' in url: provider_name = 'deezer'
             elif 'apple.com' in url: provider_name = 'apple_music'
+
+            existing = DownloadTask.objects.filter(
+                user=request.user,
+                original_url=url,
+                media_type=media_type,
+                quality=quality,
+                status__in=[DownloadTask.Status.PENDING, DownloadTask.Status.PROCESSING],
+            ).order_by("-created_at").first()
+            if existing:
+                dedup_tasks_info.append({
+                    "task_id": str(existing.id),
+                    "url": existing.original_url,
+                    "title": "Téléchargement en cours...",
+                    "provider": existing.provider,
+                    "status": existing.status,
+                    "dedup": True,
+                })
+                continue
             
             tasks_to_create.append(DownloadTask(
                 user=request.user,
@@ -886,7 +927,7 @@ class BulkDownloadView(StandardizedErrorMixin, APIView):
             for task in created_tasks:
                 process_playlist_item.delay(str(task.id))
 
-            tasks_info = [
+            tasks_info = dedup_tasks_info + [
                 {
                     "task_id": str(task.id), 
                     "url": task.original_url,

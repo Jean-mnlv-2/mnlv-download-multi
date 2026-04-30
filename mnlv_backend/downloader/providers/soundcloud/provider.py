@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import yt_dlp
 import requests
@@ -43,11 +43,11 @@ class SoundCloudProvider(MusicProvider):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=False)
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         info = self._resolve(url)
         return self._map_track(info)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         info = self._resolve(url)
         tracks = []
         
@@ -74,7 +74,7 @@ class SoundCloudProvider(MusicProvider):
             
         return tracks
 
-    def get_user_likes(self) -> List[TrackMetadata]:
+    def get_user_likes(self) -> List[ProviderTrackMetadata]:
         """Récupère les titres likés de l'utilisateur authentifié"""
         if not self.auth_token:
             raise ValueError("Authentification SoundCloud requise pour accéder aux Likes.")
@@ -86,7 +86,7 @@ class SoundCloudProvider(MusicProvider):
         data = response.json()
         return [self._map_track(item) for item in data.get('collection', [])]
 
-    def get_user_stream(self) -> List[TrackMetadata]:
+    def get_user_stream(self) -> List[ProviderTrackMetadata]:
         """Récupère le flux (Stream) de l'utilisateur"""
         if not self.auth_token:
             raise ValueError("Authentification SoundCloud requise pour accéder au Stream.")
@@ -108,7 +108,7 @@ class SoundCloudProvider(MusicProvider):
         if self.auth_token:
             self._session.put(f"{self.api_base}/me/likes/tracks/{track_id}")
 
-    def _map_track(self, info: dict) -> TrackMetadata:
+    def _map_track(self, info: dict) -> ProviderTrackMetadata:
         """Mappe les données SoundCloud (API ou yt-dlp) vers TrackMetadata"""
         title = info.get('title') or info.get('track', 'Titre inconnu')
         
@@ -131,7 +131,7 @@ class SoundCloudProvider(MusicProvider):
         else:
             duration_ms = int(raw_duration) * 1000
 
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=title,
             artist=artist,
             album=info.get('album'),

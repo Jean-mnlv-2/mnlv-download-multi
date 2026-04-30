@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import logging
 try:
@@ -98,7 +98,7 @@ class YouTubeMusicProvider(MusicProvider):
         """Vérifie si l'URL est de type music.youtube.com"""
         return bool(re.search(r"music\.youtube\.com", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre YT Music via son ID"""
         video_id = self._extract_id(url, "watch?v=")
         track = self.yt.get_song(video_id)
@@ -111,7 +111,7 @@ class YouTubeMusicProvider(MusicProvider):
         except:
             pass
 
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=details.get('title'),
             artist=details.get('author'),
             album=None,
@@ -122,13 +122,13 @@ class YouTubeMusicProvider(MusicProvider):
             original_url=url
         )
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres d'une playlist YT Music"""
         playlist_id = self._extract_id(url, "list=")
         data = self.yt.get_playlist(playlist_id)
         tracks = []
         for item in data.get('tracks', []):
-            tracks.append(TrackMetadata(
+            tracks.append(ProviderTrackMetadata(
                 title=item['title'],
                 artist=", ".join([a['name'] for a in item['artists']]),
                 album=item.get('album', {}).get('name'),

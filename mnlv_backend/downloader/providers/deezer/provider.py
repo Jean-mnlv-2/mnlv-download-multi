@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import requests
 from typing import List, Optional
@@ -149,7 +149,7 @@ class DeezerProvider(MusicProvider):
         """Vérifie si l'URL est une URL Deezer valide"""
         return bool(re.search(r"(www)?\.?deezer\.com", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un épisode de podcast"""
         if "/podcast/" in url or "/show/" in url:
             episode_id = self._extract_id(url, "(?:podcast|show)")
@@ -160,7 +160,7 @@ class DeezerProvider(MusicProvider):
         data = self._get(f"track/{track_id}")
         return self._map_track(data)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres (playlist, album, flow, favoris, podcast, radio)"""
         tracks = []
         limit = 100
@@ -181,14 +181,14 @@ class DeezerProvider(MusicProvider):
             tracks = self._fetch_all(f"radio/{radio_id}/tracks")
         return tracks
 
-    def get_user_flow(self) -> List[TrackMetadata]:
+    def get_user_flow(self) -> List[ProviderTrackMetadata]:
         """Récupère le Flow personnalisé de l'utilisateur"""
         if not self.auth_token:
             raise ValueError("Connexion Deezer requise pour accéder au Flow.")
         data = self._get("user/me/flow")
         return [self._map_track(t) for t in data.get('data', [])]
 
-    def get_user_favorites(self) -> List[TrackMetadata]:
+    def get_user_favorites(self) -> List[ProviderTrackMetadata]:
         """Récupère tous les titres 'Coups de Cœur' de l'utilisateur"""
         if not self.auth_token:
             raise ValueError("Connexion Deezer requise pour accéder aux favoris.")
@@ -215,7 +215,7 @@ class DeezerProvider(MusicProvider):
             'playlists': data.get('playlists', {}).get('data', [])
         }
 
-    def _fetch_all(self, endpoint: str, params: dict = None, extra_meta: dict = None, mapper=None) -> List[TrackMetadata]:
+    def _fetch_all(self, endpoint: str, params: dict = None, extra_meta: dict = None, mapper=None) -> List[ProviderTrackMetadata]:
         """Helper générique pour la pagination complète"""
         tracks = []
         limit = 100
@@ -238,9 +238,9 @@ class DeezerProvider(MusicProvider):
             index += limit
         return tracks
 
-    def _map_episode(self, data: dict) -> TrackMetadata:
+    def _map_episode(self, data: dict) -> ProviderTrackMetadata:
         """Mappe un épisode de podcast vers TrackMetadata"""
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=data.get('title', 'Épisode inconnu'),
             artist=data.get('show', {}).get('title', 'Podcast inconnu'),
             album="Podcast",
@@ -262,7 +262,7 @@ class DeezerProvider(MusicProvider):
             raise ValueError(f"URL Deezer invalide pour le type {type_name}")
         return match.group(1)
 
-    def _map_track(self, data: dict) -> TrackMetadata:
+    def _map_track(self, data: dict) -> ProviderTrackMetadata:
         """Mappe le dictionnaire Deezer vers l'objet TrackMetadata standard"""
         album = data.get('album', {})
         artist = data.get('artist', {})
@@ -270,7 +270,7 @@ class DeezerProvider(MusicProvider):
         # Filtre de contenu explicite (Parental Control)
         explicit = data.get('explicit_lyrics', False)
         
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=data.get('title', 'Titre inconnu'),
             artist=artist.get('name', 'Artiste inconnu'),
             album=album.get('title'),

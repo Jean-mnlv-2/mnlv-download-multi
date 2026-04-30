@@ -37,6 +37,7 @@ from .views import (
 )
 from csv_handler.views import CSVUploadView, PendingUploadsView
 from media_tools.views import MediaConvertView, MediaEditTagsView
+from .schema import schema_view
 
 app_name = 'api'
 
@@ -47,6 +48,7 @@ urlpatterns = [
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='user_profile'),
     path('health/', HealthCheckView.as_view(), name='health_check'),
+    path('schema/', schema_view, name='schema'),
     
     # Provider Auth
     path('auth/providers/status/', ProviderAuthStatusView.as_view(), name='provider_status'),

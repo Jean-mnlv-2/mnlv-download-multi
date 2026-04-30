@@ -1,7 +1,7 @@
 from django.test import TestCase
 from unittest.mock import MagicMock, patch, PropertyMock
 from downloader.providers.factory import ProviderFactory
-from downloader.providers.base import TrackMetadata
+from downloader.providers.base import ProviderTrackMetadata
 from downloader.providers.spotify.provider import SpotifyProvider
 from downloader.providers.deezer.provider import DeezerProvider
 from downloader.providers.boomplay.provider import BoomplayProvider

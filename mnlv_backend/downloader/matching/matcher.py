@@ -1,6 +1,6 @@
 from typing import Optional
 import yt_dlp
-from ..providers.base import TrackMetadata
+from ..providers.base import ProviderTrackMetadata
 
 class ISRCMatcher:
     """
@@ -11,7 +11,7 @@ class ISRCMatcher:
     def __init__(self, logger=None):
         self.logger = logger
 
-    def find_best_match(self, metadata: TrackMetadata) -> str:
+    def find_best_match(self, metadata: ProviderTrackMetadata) -> str:
         """
         Trouve l'URL YouTube la plus pertinente.
         1. Recherche par ISRC sur YouTube Music (100% précision)
@@ -31,27 +31,65 @@ class ISRCMatcher:
                 if match: return match
 
         suffix = " (Podcast Episode)" if metadata.is_episode else " (Official Audio)"
-        search_query = f"{metadata.artist} - {metadata.title}{suffix}"
+        year = f" {metadata.release_year}" if metadata.release_year else ""
+        album = f" {metadata.album}" if metadata.album else ""
+        search_query = f"{metadata.artist} - {metadata.title}{album}{year}{suffix}"
         if self.logger:
             self.logger.info(f"Fallback matching textuel: {search_query}")
         
         return f"ytsearch1:{search_query}"
 
-    def _try_search(self, query: str, metadata: TrackMetadata, label: str) -> Optional[str]:
+    def _try_search(self, query: str, metadata: ProviderTrackMetadata, label: str) -> Optional[str]:
         """Helper pour tenter une recherche yt-dlp"""
         if self.logger:
             self.logger.info(f"Tentative de matching {label}: {query}")
         
         with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
             try:
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-                if info['entries'] and self.verify_match(info['entries'][0], metadata):
-                    return info['entries'][0]['webpage_url']
+                info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                entries = info.get('entries') or []
+                best = None
+                best_score = -1
+                for e in entries[:5]:
+                    if not e:
+                        continue
+                    score = self._score_entry(e, metadata)
+                    if score > best_score:
+                        best_score = score
+                        best = e
+                if best and self.verify_match(best, metadata):
+                    return best.get('webpage_url')
             except Exception:
                 pass
         return None
 
-    def verify_match(self, info_dict: dict, metadata: TrackMetadata) -> bool:
+    def _score_entry(self, info_dict: dict, metadata: ProviderTrackMetadata) -> int:
+        """
+        Score simple (pas parfait mais nettement meilleur que ytsearch1):
+        - proximité durée
+        - présence artiste/titre dans le titre YouTube
+        """
+        title = (info_dict.get('title') or "").lower()
+        artist = (metadata.artist or "").lower()
+        track = (metadata.title or "").lower()
+        score = 0
+        if artist and artist.split(",")[0].strip() and artist.split(",")[0].strip() in title:
+            score += 3
+        if track and track.strip() and track.strip() in title:
+            score += 3
+        if "official audio" in title or "official video" in title:
+            score += 1
+        if metadata.duration_ms and info_dict.get('duration'):
+            diff = abs((metadata.duration_ms / 1000) - info_dict.get('duration', 0))
+            if diff <= 3:
+                score += 3
+            elif diff <= 8:
+                score += 2
+            elif diff <= 15:
+                score += 1
+        return score
+
+    def verify_match(self, info_dict: dict, metadata: ProviderTrackMetadata) -> bool:
         """
         Vérifie si le résultat yt-dlp correspond aux métadonnées (durée, etc.)
         """
@@ -61,7 +99,7 @@ class ISRCMatcher:
         # Vérification de la durée (tolérance de 10 secondes)
         if metadata.duration_ms and info_dict.get('duration'):
             duration_diff = abs((metadata.duration_ms / 1000) - info_dict['duration'])
-            if duration_diff > 15: # Un peu plus souple
+            if duration_diff > 15:
                 if self.logger:
                     self.logger.warning(f"Écart de durée trop important: {duration_diff}s")
                 return False

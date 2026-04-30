@@ -1,4 +1,4 @@
-from ..base import MusicProvider, TrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import spotipy
 import logging
@@ -152,7 +152,7 @@ class SpotifyProvider(MusicProvider):
         """Vérifie si l'URL est une URL Spotify valide"""
         return bool(re.search(r"(open|play|www)?\.?spotify\.com", url))
 
-    def get_track_info(self, url: str) -> TrackMetadata:
+    def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre, d'un épisode ou d'un chapitre Spotify"""
         market = getattr(settings, 'SPOTIFY_MARKET', 'FR')
         
@@ -169,7 +169,7 @@ class SpotifyProvider(MusicProvider):
         track = self.client.track(url, market=market)
         return self._map_track(track)
 
-    def get_playlist_tracks(self, url: str) -> List[TrackMetadata]:
+    def get_playlist_tracks(self, url: str) -> List[ProviderTrackMetadata]:
         """Extrait la liste des titres d'une playlist, album, show ou livre audio"""
         tracks = []
         market = getattr(settings, 'SPOTIFY_MARKET', 'FR')
@@ -238,14 +238,14 @@ class SpotifyProvider(MusicProvider):
             
         return tracks
 
-    def _map_track(self, track: dict) -> TrackMetadata:
+    def _map_track(self, track: dict) -> ProviderTrackMetadata:
         """Mappe le dictionnaire Spotify vers l'objet TrackMetadata standard"""
         album = track.get('album', {})
         images = album.get('images', [])
         cover_url = images[0]['url'] if images else None
         external_ids = track.get('external_ids', {})
         
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=track['name'],
             artist=", ".join([a['name'] for a in track['artists']]),
             album=album.get('name'),
@@ -261,12 +261,12 @@ class SpotifyProvider(MusicProvider):
             original_url=track.get('external_urls', {}).get('spotify')
         )
 
-    def _map_episode(self, ep: dict) -> TrackMetadata:
+    def _map_episode(self, ep: dict) -> ProviderTrackMetadata:
         """Mappe un épisode de podcast vers TrackMetadata"""
         images = ep.get('images', [])
         cover_url = images[0]['url'] if images else None
         
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=ep['name'],
             artist=ep.get('show', {}).get('name', 'Podcast'),
             album=ep.get('show', {}).get('name'),
@@ -279,7 +279,7 @@ class SpotifyProvider(MusicProvider):
             original_url=ep.get('external_urls', {}).get('spotify')
         )
 
-    def _map_audiobook(self, ab: dict) -> TrackMetadata:
+    def _map_audiobook(self, ab: dict) -> ProviderTrackMetadata:
         """Mappe un livre audio vers TrackMetadata (en tant qu'entité unique)"""
         images = ab.get('images', [])
         cover_url = images[0]['url'] if images else None
@@ -292,7 +292,7 @@ class SpotifyProvider(MusicProvider):
         edition = ab.get('edition')
         title = f"{ab['name']} ({edition})" if edition else ab['name']
         
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=title,
             artist=artist,
             album=ab['name'],
@@ -305,7 +305,7 @@ class SpotifyProvider(MusicProvider):
             original_url=ab.get('external_urls', {}).get('spotify')
         )
 
-    def _map_chapter(self, ch: dict) -> TrackMetadata:
+    def _map_chapter(self, ch: dict) -> ProviderTrackMetadata:
         """Mappe un chapitre de livre audio vers TrackMetadata"""
         images = ch.get('images', [])
         cover_url = images[0]['url'] if images else None
@@ -323,7 +323,7 @@ class SpotifyProvider(MusicProvider):
         if edition:
             album = f"{album} ({edition})"
 
-        return TrackMetadata(
+        return ProviderTrackMetadata(
             title=ch['name'],
             artist=artist,
             album=album,

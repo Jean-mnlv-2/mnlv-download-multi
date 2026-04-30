@@ -113,6 +113,8 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
+let refreshPromise: Promise<{ access: string; refresh?: string }> | null = null;
+
 // Refresh token interceptor
 axios.interceptors.response.use(
   (response) => response,
@@ -125,8 +127,16 @@ axios.interceptors.response.use(
       
       if (refreshToken) {
         try {
-          const response = await axios.post('/api/auth/refresh/', { refresh: refreshToken });
-          const { access, refresh } = response.data;
+          if (!refreshPromise) {
+            refreshPromise = axios
+              .post('/api/auth/refresh/', { refresh: refreshToken })
+              .then((r) => r.data)
+              .finally(() => {
+                refreshPromise = null;
+              });
+          }
+
+          const { access, refresh } = await refreshPromise;
           
           localStorage.setItem('mnlv_access_token', access);
           if (refresh) {
