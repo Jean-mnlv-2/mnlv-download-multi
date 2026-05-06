@@ -44,6 +44,29 @@ MAX_PLAYLIST_TRACKS = int(os.getenv("MAX_PLAYLIST_TRACKS", "500"))
 def get_provider_auth(user, provider_name):
     return ProviderAuth.objects.filter(user=user, provider=provider_name).first()
 
+from csv_handler.models import PendingFileUpload
+
+class LogoutView(APIView):
+    """
+    Endpoint POST /api/auth/logout/
+    Nettoie proprement les tokens de providers et les uploads en attente.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        try:
+            with transaction.atomic():
+                auth_deleted, _ = ProviderAuth.objects.filter(user=user).delete()
+                
+                pending_deleted, _ = PendingFileUpload.objects.filter(user=user).delete()
+
+            logger.info(f"Logout cleanup for user {user.id}: {auth_deleted} provider tokens and {pending_deleted} pending uploads removed.")
+            return Response({"message": "Déconnexion réussie et données nettoyées."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception(f"Error during logout cleanup for user {user.id}: {e}")
+            return Response({"error": "Erreur lors du nettoyage des données"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class ProviderAuthStatusView(APIView):
     """
     Endpoint GET /api/auth/providers/status/
@@ -66,6 +89,38 @@ class ProviderAuthStatusView(APIView):
         }
         logger.info(f"Auth status check for user {request.user.id}: {status_dict}")
         return Response(status_dict)
+
+class ProviderDisconnectView(APIView):
+    """
+    Endpoint POST /api/auth/providers/disconnect/
+    Supprime la connexion pour un provider spécifique.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        provider_id = request.data.get('provider')
+        if not provider_id:
+            return Response({"error": "Provider manquant"}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_providers = [choice[0] for choice in ProviderAuth.PROVIDER_CHOICES]
+        if provider_id not in valid_providers:
+            return Response({"error": "Provider invalide"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                deleted_count, _ = ProviderAuth.objects.filter(
+                    user=request.user, 
+                    provider=provider_id
+                ).delete()
+                
+            if deleted_count > 0:
+                logger.info(f"User {request.user.id} disconnected from {provider_id}")
+                return Response({"message": f"Déconnecté de {provider_id} avec succès"}, status=status.HTTP_200_OK)
+            else:
+                return Response({"error": "Aucune connexion trouvée pour ce provider"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.exception(f"Error disconnecting provider {provider_id} for user {request.user.id}: {e}")
+            return Response({"error": "Erreur lors de la déconnexion"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SpotifyLoginView(APIView):
     """
@@ -322,6 +377,8 @@ class AmazonMusicLoginView(APIView):
     def get(self, request):
         return Response({"message": "Amazon Music login non encore implémenté"}, status=status.HTTP_501_NOT_IMPLEMENTED)
 
+from django.core.cache import cache
+
 class TidalLoginView(APIView):
     """
     Endpoint GET /api/auth/providers/tidal/login/
@@ -338,14 +395,16 @@ class TidalLoginView(APIView):
         code_challenge_hash = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         code_challenge = base64.urlsafe_b64encode(code_challenge_hash).decode('utf-8').replace('=', '')
         
-        request.session['tidal_code_verifier'] = code_verifier
-        request.session.modified = True
+        cache_key = f"tidal_pkce_{request.user.id}"
+        cache.set(cache_key, code_verifier, timeout=600)
+        
+        logger.info(f"Tidal PKCE: Verifier stored in cache for user {request.user.id}")
         
         params = {
             'client_id': client_id,
             'redirect_uri': settings.TIDAL_REDIRECT_URI,
             'response_type': 'code',
-            'scope': 'user.read playlists.read playlists.write collection.read',
+            'scope': 'user.read playlists.read playlists.write collection.read collection.write search.read entitlements.read',
             'state': str(request.user.id),
             'code_challenge': code_challenge,
             'code_challenge_method': 'S256'
@@ -379,12 +438,12 @@ class TidalCallbackView(APIView):
         try:
             user = User.objects.get(id=user_id)
             
-            code_verifier = request.session.get('tidal_code_verifier')
+            cache_key = f"tidal_pkce_{user_id}"
+            code_verifier = cache.get(cache_key)
             
             # Échange du code contre un token
-            token_url = "https://login.tidal.com/oauth2/token"
+            token_url = "https://auth.tidal.com/v1/oauth2/token"
             
-            auth = (settings.TIDAL_CLIENT_ID, settings.TIDAL_CLIENT_SECRET)
             data = {
                 'grant_type': 'authorization_code',
                 'code': code,
@@ -394,15 +453,20 @@ class TidalCallbackView(APIView):
             
             if code_verifier:
                 data['code_verifier'] = code_verifier
+                logger.info(f"Using code_verifier for user {user_id}")
+            else:
+                logger.error(f"FATAL: Tidal code_verifier missing for user {user_id} in cache. Token exchange will likely fail.")
             
             logger.info(f"Attempting Tidal PKCE token exchange for user {user_id}")
             
-            response = requests.post(token_url, data=data, auth=auth)
+            data['client_secret'] = settings.TIDAL_CLIENT_SECRET
+            response = requests.post(token_url, data=data)
             
             if response.status_code != 200:
-                logger.error(f"Tidal token exchange error {response.status_code}: {response.text}")
-                data['client_secret'] = settings.TIDAL_CLIENT_SECRET
-                response = requests.post(token_url, data=data)
+                logger.warning(f"Tidal exchange Attempt 1 failed ({response.status_code}): {response.text}")
+                auth = (settings.TIDAL_CLIENT_ID, settings.TIDAL_CLIENT_SECRET)
+                del data['client_secret']
+                response = requests.post(token_url, data=data, auth=auth)
                 
             token_data = response.json()
             
@@ -410,9 +474,7 @@ class TidalCallbackView(APIView):
                 logger.error(f"Tidal token exchange failed: {token_data}")
                 return redirect(f'{settings.FRONTEND_URL}/?auth_error=tidal&reason=token_exchange_failed')
 
-            # Nettoyage de la session
-            if 'tidal_code_verifier' in request.session:
-                del request.session['tidal_code_verifier']
+            cache.delete(cache_key)
 
             with transaction.atomic():
                 ProviderAuth.objects.update_or_create(
@@ -421,6 +483,7 @@ class TidalCallbackView(APIView):
                     defaults={
                         'access_token': token_data['access_token'],
                         'refresh_token': token_data.get('refresh_token'),
+                        'provider_user_id': str(token_data.get('user_id', '')),
                         'expires_at': timezone.now() + timedelta(seconds=int(token_data.get('expires_in', 3600)))
                     }
                 )
@@ -687,10 +750,10 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
                             "status": "ready"
                         })
                     
-                    PendingFileUpload.objects.create(
+                    PendingFileUpload.objects.update_or_create(
                         user=request.user,
-                        filename=f"Batch : {url.split('/')[-1]}",
-                        data=resolved_tracks
+                        filename=f"Batch : {url.split('/')[-1].split('?')[0]}",
+                        defaults={'data': resolved_tracks}
                     )
                     
                     return Response({
@@ -709,7 +772,21 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
         explicit_filter = serializer.validated_data.get('explicit_filter', False)
 
         try:
-            provider = ProviderFactory.get_provider(url)
+            auth = None
+            if "/tidal.com/" in url:
+                auth = get_provider_auth(request.user, 'tidal')
+            elif "/spotify.com/" in url:
+                auth = get_provider_auth(request.user, 'spotify')
+            elif "/deezer.com/" in url:
+                auth = get_provider_auth(request.user, 'deezer')
+            elif "/apple.com/" in url:
+                auth = get_provider_auth(request.user, 'apple_music')
+
+            auth_token = auth.access_token if auth else None
+            refresh_token = auth.refresh_token if auth else None
+            user_id = auth.provider_user_id if auth else None
+
+            provider = ProviderFactory.get_provider(url, auth_token=auth_token, refresh_token=refresh_token, user_id=user_id)
             provider_name = provider.__class__.__name__.lower().replace("provider", "")
 
             if "/playlist/" in url or "/album/" in url:
@@ -717,6 +794,10 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
                 
                 from csv_handler.models import PendingFileUpload
                 
+                # Sanétisation de l'ID de la playlist pour la déduplication
+                playlist_id = url.split('/')[-1].split('?')[0]
+                display_filename = f"Playlist {provider_name.title()} : {playlist_id}"
+
                 resolved_tracks = []
                 for track in tracks[:MAX_PLAYLIST_TRACKS]:
                     if explicit_filter and getattr(track, 'explicit', False):
@@ -730,10 +811,10 @@ class SubmitDownloadView(StandardizedErrorMixin, APIView):
                         "status": "ready"
                     })
 
-                PendingFileUpload.objects.create(
+                PendingFileUpload.objects.update_or_create(
                     user=request.user,
-                    filename=f"Playlist {provider_name.title()} : {url.split('/')[-1]}",
-                    data=resolved_tracks
+                    filename=display_filename,
+                    defaults={'data': resolved_tracks}
                 )
 
                 logger.info(f"Playlist staged for preview: {len(resolved_tracks)} tracks for user {request.user.id}")
@@ -1043,29 +1124,36 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
             'spotify' if 'spotify.com' in provider_url else
             'deezer' if 'deezer.com' in provider_url else
             'apple_music' if 'apple.com' in provider_url else
+            'tidal' if 'tidal.com' in provider_url else
             'youtube_music' if 'youtube.com' in provider_url or 'youtube_music.com' in provider_url else
             'boomplay' if 'boomplay.com' in provider_url or 'boomplaymusic.com' in provider_url else
+            'soundcloud' if 'soundcloud.com' in provider_url else
             None
         )
 
-        if not auth_token:
-            if provider_name:
-                auth_obj = get_provider_auth(request.user, provider_name)
-                if auth_obj:
-                    if auth_obj.expires_at and auth_obj.expires_at <= timezone.now() + timedelta(minutes=1):
-                        logger.info(f"Token {provider_name} expiré pour {request.user.id}, rafraîchissement...")
-                        try:
-                            if provider_name == 'spotify':
-                                refresh_spotify_token(auth_obj)
-                            elif provider_name == 'deezer':
-                                refresh_deezer_token(auth_obj)
-                            elif provider_name == 'tidal':
-                                refresh_tidal_token(auth_obj)
-                            auth_obj.refresh_from_db()
-                        except Exception as e:
-                            logger.error(f"Échec du refresh automatique {provider_name}: {e}")
-                    
+        refresh_token = None
+        user_id = None
+        
+        if provider_name:
+            auth_obj = get_provider_auth(request.user, provider_name)
+            if auth_obj:
+                if auth_obj.expires_at and auth_obj.expires_at <= timezone.now() + timedelta(minutes=1):
+                    logger.info(f"Token {provider_name} expiré pour {request.user.id}, rafraîchissement...")
+                    try:
+                        if provider_name == 'spotify':
+                            refresh_spotify_token(auth_obj)
+                        elif provider_name == 'deezer':
+                            refresh_deezer_token(auth_obj)
+                        elif provider_name == 'tidal':
+                            refresh_tidal_token(auth_obj)
+                        auth_obj.refresh_from_db()
+                    except Exception as e:
+                        logger.error(f"Échec du refresh automatique {provider_name}: {e}")
+                
+                if not auth_token:
                     auth_token = auth_obj.access_token
+                refresh_token = auth_obj.refresh_token
+                user_id = auth_obj.provider_user_id
 
         if not auth_token:
             logger.warning(f"Playlist action {action} requires auth for user {request.user.id}")
@@ -1096,7 +1184,7 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
                     break
                 
             try:
-                provider = ProviderFactory.get_provider(effective_url, auth_token=auth_token)
+                provider = ProviderFactory.get_provider(effective_url, auth_token=auth_token, refresh_token=refresh_token, user_id=user_id)
             except ValueError:
                 explicit_provider = data.get('provider')
                 if explicit_provider:
@@ -1111,8 +1199,8 @@ class PlaylistActionView(StandardizedErrorMixin, APIView):
                             from downloader.providers.apple_music import AppleMusicProvider
                             provider = AppleMusicProvider(auth_token=auth_token)
                         elif explicit_provider == 'tidal':
-                            from downloader.providers.tidal import TidalProvider
-                            provider = TidalProvider(auth_token=auth_token)
+                            from downloader.providers.tidal.provider import TidalProvider
+                            provider = TidalProvider(auth_token=auth_token, refresh_token=refresh_token, user_id=user_id)
                         elif explicit_provider == 'soundcloud':
                             from downloader.providers.soundcloud import SoundCloudProvider
                             provider = SoundCloudProvider(auth_token=auth_token)

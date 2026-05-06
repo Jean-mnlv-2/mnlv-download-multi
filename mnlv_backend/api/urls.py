@@ -13,9 +13,11 @@ from .views import (
     BulkClearHistoryView,
     HealthCheckView,
     RegisterView,
+    LogoutView,
     UserProfileView,
     PlaylistActionView,
     ProviderAuthStatusView,
+    ProviderDisconnectView,
     SpotifyLoginView,
     SpotifyCallbackView,
     DeezerLoginView,
@@ -44,6 +46,7 @@ app_name = 'api'
 urlpatterns = [
     # Auth
     path('auth/register/', RegisterView.as_view(), name='register'),
+    path('auth/logout/', LogoutView.as_view(), name='logout'),
     path('auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='user_profile'),
@@ -52,6 +55,7 @@ urlpatterns = [
     
     # Provider Auth
     path('auth/providers/status/', ProviderAuthStatusView.as_view(), name='provider_status'),
+    path('auth/providers/disconnect/', ProviderDisconnectView.as_view(), name='provider_disconnect'),
     path('auth/providers/spotify/login/', SpotifyLoginView.as_view(), name='spotify_login'),
     path('auth/providers/spotify/callback/', SpotifyCallbackView.as_view(), name='spotify_callback'),
     path('auth/providers/apple-music/login/', AppleMusicLoginView.as_view(), name='apple_music_login'),

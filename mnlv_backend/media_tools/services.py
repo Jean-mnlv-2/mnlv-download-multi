@@ -6,6 +6,10 @@ from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TYER, APIC
 from mutagen.mp4 import MP4, MP4Cover
 import requests
+from django.core.cache import cache
+import hashlib
+
+from downloader.providers.base import monitor_provider
 
 class MediaService:
     """
@@ -13,6 +17,29 @@ class MediaService:
     """
 
     @staticmethod
+    def _get_cached_cover(cover_url: str) -> bytes | None:
+        """Récupère la pochette depuis le cache pour éviter les téléchargements répétés."""
+        if not cover_url:
+            return None
+        
+        url_hash = hashlib.md5(cover_url.encode()).hexdigest()
+        cache_key = f"cover_data:{url_hash}"
+        
+        cover_data = cache.get(cache_key)
+        if cover_data:
+            return cover_data
+            
+        try:
+            r = requests.get(cover_url, timeout=10)
+            if r.status_code == 200:
+                cache.set(cache_key, r.content, timeout=86400)
+                return r.content
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    @monitor_provider
     def convert_to_format(input_path: str, target_format: str) -> str:
         """
         Convertit un fichier media vers un format cible via FFmpeg.
@@ -54,6 +81,7 @@ class MediaService:
         return MediaService.convert_to_format(input_path, 'WAV')
 
     @staticmethod
+    @monitor_provider
     def apply_metadata(file_path: str, metadata: dict, is_video: bool = False):
         """
         Met à jour les tags (ID3 pour MP3 ou MP4 pour vidéo).
@@ -64,6 +92,8 @@ class MediaService:
             raise ValueError(f"Fichier non trouvé : {file_path}")
 
         try:
+            cover_data = MediaService._get_cached_cover(metadata.get('cover_url'))
+
             if not is_video:
                 # Logique MP3 / ID3
                 audio = MP3(path, ID3=ID3)
@@ -80,22 +110,14 @@ class MediaService:
                     audio.tags.add(TYER(encoding=3, text=str(metadata['release_year'])))
                 
                 # Pochette
-                cover_url = metadata.get('cover_url')
-                if cover_url:
-                    try:
-                        r = requests.get(cover_url, timeout=10)
-                        if r.status_code == 200:
-                            mime_type = r.headers.get('Content-Type', 'image/jpeg')
-                            audio.tags.add(APIC(
-                                encoding=3, 
-                                mime=mime_type, 
-                                type=3, 
-                                desc='Front Cover', 
-                                data=r.content
-                            ))
-                    except Exception as e:
-                        from core.logger_utils import get_mnlv_logger
-                        get_mnlv_logger("media_service").warning(f"Échec téléchargement pochette : {e}")
+                if cover_data:
+                    audio.tags.add(APIC(
+                        encoding=3, 
+                        mime='image/jpeg', 
+                        type=3, 
+                        desc='Front Cover', 
+                        data=cover_data
+                    ))
                 audio.save()
             else:
                 # Logique MP4
@@ -110,14 +132,8 @@ class MediaService:
                     video["\xa9day"] = str(metadata['release_year'])
                 
                 # Pochette MP4
-                cover_url = metadata.get('cover_url')
-                if cover_url:
-                    try:
-                        r = requests.get(cover_url, timeout=10)
-                        if r.status_code == 200:
-                            video["covr"] = [MP4Cover(r.content, imageformat=MP4Cover.FORMAT_JPEG)]
-                    except Exception as e:
-                        pass
+                if cover_data:
+                    video["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 video.save()
 
         except Exception as e:

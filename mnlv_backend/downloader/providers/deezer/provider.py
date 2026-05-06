@@ -1,48 +1,81 @@
-from ..base import MusicProvider, ProviderTrackMetadata
+from ..base import MusicProvider, ProviderTrackMetadata, ProviderAuthError, ProviderRateLimitError, ProviderResourceNotFoundError, ProviderAPIError, monitor_provider, monitor_provider_async
 import re
 import requests
+import httpx
 from typing import List, Optional
 from django.conf import settings
 
 class DeezerProvider(MusicProvider):
     """
     Adapteur pour Deezer utilisant son API publique REST.
-    Suit le blueprint fonctionnel de SpotifyProvider.
-    Optimisé pour la pagination complète et le matching haute précision.
+    Supporte les modes Synchrone (requests) et Asynchrone (httpx).
     """
     API_BASE = settings.DEEZER_API_BASE
 
     def __init__(self, auth_token: Optional[str] = None):
-        """
-        Initialise le provider Deezer.
-        Si un auth_token est fourni, il sera utilisé pour les opérations d'écriture.
-        """
         self.auth_token = auth_token
         self._session = requests.Session()
+        self._async_client = None
 
-    def _get(self, endpoint: str, params: dict = None) -> dict:
-        """Helper pour les requêtes GET avec gestion d'erreurs centralisée"""
-        if params is None:
-            params = {}
-        if self.auth_token:
-            params['access_token'] = self.auth_token
+    async def get_async_client(self):
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(timeout=15.0)
+        return self._async_client
+
+    @monitor_provider_async
+    async def _get_async(self, endpoint: str, params: dict = None) -> dict:
+        """Helper asynchrone pour Deezer avec httpx"""
+        if params is None: params = {}
+        if self.auth_token: params['access_token'] = self.auth_token
 
         url = f"{self.API_BASE}/{endpoint.lstrip('/')}"
-        response = self._session.get(url, params=params, timeout=15)
+        client = await self.get_async_client()
         
-        if response.status_code != 200:
-            raise ValueError(f"Deezer API error {response.status_code}: {response.text}")
+        try:
+            response = await client.get(url, params=params)
             
-        data = response.json()
-        if isinstance(data, dict) and "error" in data:
-            error = data["error"]
-            code = error.get("code")
-            msg = error.get("message")
-            if code == 4:
-                raise RuntimeError(f"Deezer Rate Limit: {msg}")
-            raise ValueError(f"Deezer API Error [{code}]: {msg}")
-            
-        return data
+            if response.status_code in [401, 403]:
+                raise ProviderAuthError("Token Deezer invalide.", code="DEEZER_AUTH_ERROR")
+            if response.status_code == 404:
+                raise ProviderResourceNotFoundError(f"Deezer 404: {endpoint}", code="DEEZER_NOT_FOUND")
+            if response.status_code != 200:
+                raise ProviderAPIError(f"Deezer API {response.status_code}", code="DEEZER_API_ERROR")
+                
+            data = response.json()
+            if isinstance(data, dict) and "error" in data:
+                self._raise_for_deezer_error(data["error"])
+            return data
+        except httpx.RequestError as e:
+            raise ProviderAPIError(f"Erreur réseau Deezer (Async): {str(e)}", code="DEEZER_NETWORK_ERROR")
+
+    def _raise_for_deezer_error(self, error: dict):
+        """Helper pour transformer les erreurs Deezer JSON en exceptions."""
+        code = error.get("code")
+        msg = error.get("message")
+        if code == 4: raise ProviderRateLimitError(f"Deezer Rate Limit: {msg}", code="DEEZER_RATE_LIMIT")
+        if code in [200, 300]: raise ProviderAuthError(f"Deezer Auth: {msg}", code="DEEZER_AUTH_ERROR")
+        if code == 800: raise ProviderResourceNotFoundError(f"Deezer Not Found: {msg}", code="DEEZER_NOT_FOUND")
+        raise ProviderAPIError(f"Deezer Error [{code}]: {msg}", code=f"DEEZER_ERROR_{code}")
+
+    @monitor_provider
+    def _get(self, endpoint: str, params: dict = None) -> dict:
+        """Helper synchrone conservé pour compatibilité"""
+        if params is None: params = {}
+        if self.auth_token: params['access_token'] = self.auth_token
+
+        url = f"{self.API_BASE}/{endpoint.lstrip('/')}"
+        try:
+            response = self._session.get(url, params=params, timeout=15)
+            if response.status_code in [401, 403]: raise ProviderAuthError("Token Deezer invalide.")
+            if response.status_code == 404: raise ProviderResourceNotFoundError(f"Deezer 404: {endpoint}")
+            if response.status_code != 200: raise ProviderAPIError(f"Deezer API {response.status_code}")
+                
+            data = response.json()
+            if isinstance(data, dict) and "error" in data:
+                self._raise_for_deezer_error(data["error"])
+            return data
+        except requests.exceptions.RequestException as e:
+            raise ProviderAPIError(f"Erreur réseau Deezer : {str(e)}", code="DEEZER_NETWORK_ERROR")
 
     def create_playlist(self, name: str, description: str = "", public: bool = False) -> str:
         """Crée une nouvelle playlist (Nécessite auth_token / access_token)"""
@@ -80,13 +113,18 @@ class DeezerProvider(MusicProvider):
              raise ValueError(f"Erreur Deezer: {data['error']['message']}")
 
     def add_tracks_to_playlist(self, playlist_id: str, track_urls: List[str], position: Optional[int] = None) -> Optional[str]:
-        """Ajoute des titres via leurs IDs Deezer"""
+        """Ajoute des titres via leurs IDs Deezer avec découpage par lots (max 100)"""
         if not self.auth_token:
             raise ValueError("Token Deezer requis pour modifier une playlist.")
             
         track_ids = [self._extract_id(u, "track") for u in track_urls]
-        params = {"songs": ",".join(track_ids)}
-        self._post(f"playlist/{playlist_id}/tracks", params=params)
+        
+        chunk_size = 100
+        for i in range(0, len(track_ids), chunk_size):
+            chunk = track_ids[i:i + chunk_size]
+            params = {"songs": ",".join(chunk)}
+            self._post(f"playlist/{playlist_id}/tracks", params=params)
+            
         return None
 
     def remove_tracks_from_playlist(self, playlist_id: str, track_urls: List[str], snapshot_id: Optional[str] = None) -> Optional[str]:
@@ -149,6 +187,50 @@ class DeezerProvider(MusicProvider):
         """Vérifie si l'URL est une URL Deezer valide"""
         return bool(re.search(r"(www)?\.?deezer\.com", url))
 
+    @monitor_provider_async
+    async def get_track_info_async(self, url: str) -> ProviderTrackMetadata:
+        """Version asynchrone native de get_track_info"""
+        if "/podcast/" in url or "/show/" in url:
+            episode_id = self._extract_id(url, "(?:podcast|show)")
+            data = await self._get_async(f"episode/{episode_id}")
+            return self._map_episode(data)
+            
+        track_id = self._extract_id(url, "track")
+        data = await self._get_async(f"track/{track_id}")
+        return self._map_track(data)
+
+    @monitor_provider_async
+    async def get_playlist_tracks_async(self, url: str) -> List[ProviderTrackMetadata]:
+        """Version asynchrone native de get_playlist_tracks"""
+        async def fetch_page(offset, limit):
+            endpoint = ""
+            extra_meta = None
+            if "/playlist/" in url:
+                playlist_id = self._extract_id(url, "playlist")
+                endpoint = f"playlist/{playlist_id}/tracks"
+            elif "/album/" in url:
+                album_id = self._extract_id(url, "album")
+                endpoint = f"album/{album_id}/tracks"
+                if offset == 0:
+                    album_data = await self._get_async(f"album/{album_id}")
+                    extra_meta = {'album': album_data}
+            
+            data = await self._get_async(endpoint, params={"index": offset, "limit": limit})
+            batch = data.get('data', [])
+            
+            # Map items
+            mapped = []
+            for item in batch:
+                if extra_meta:
+                    for k, v in extra_meta.items():
+                        if k not in item: item[k] = v
+                mapped.append(self._map_track(item))
+            
+            return mapped, data.get('total', len(batch))
+
+        return await self.paginate_items_async(fetch_page)
+
+    @monitor_provider
     def get_track_info(self, url: str) -> ProviderTrackMetadata:
         """Extrait les métadonnées d'un titre ou d'un épisode de podcast"""
         if "/podcast/" in url or "/show/" in url:

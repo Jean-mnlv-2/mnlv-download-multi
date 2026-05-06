@@ -187,7 +187,22 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_WORKER_CONCURRENCY = int(os.getenv('CELERY_WORKER_CONCURRENCY', '4'))
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-CELERY_TASK_ACKS_LATE = True  # La tâche n'est acquittée qu'après succès (évite les pertes sur crash)
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_QUEUES = {
+    'high_priority': {
+        'exchange': 'high_priority',
+        'routing_key': 'high_priority',
+    },
+    'low_priority': {
+        'exchange': 'low_priority',
+        'routing_key': 'low_priority',
+    },
+    'media_processing': {
+        'exchange': 'media_processing',
+        'routing_key': 'media_processing',
+    },
+}
+CELERY_TASK_DEFAULT_QUEUE = 'high_priority'
 
 # Configuration du Logging Standardisé Django
 LOGGING = {

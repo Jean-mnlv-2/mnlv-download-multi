@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { useTaskStore, Notification } from './store/useTaskStore';
+import { useTaskStore } from './store/useTaskStore';
 import { useAuthStore } from './store/useAuthStore';
 import DownloadCard from './components/downloader/DownloadCard';
+import TaskList from './components/downloader/TaskList';
 import URLInput from './components/downloader/URLInput';
 import CSVUpload from './components/downloader/CSVUpload';
+import StagingArea from './components/downloader/StagingArea';
 import PlaylistExplorer from './components/downloader/PlaylistExplorer';
 import MediaTools from './components/media/MediaTools';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import ProviderManager from './components/auth/ProviderManager';
 import HistoryView from './components/downloader/HistoryView';
-import AdsDashboard from './components/ads/AdsDashboard';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Toaster } from 'react-hot-toast';
@@ -26,106 +27,26 @@ import {
   Sun, 
   Globe, 
   Music2, 
-  Disc, 
-  Radio, 
-  Cloud, 
-  Youtube,
-  Megaphone,
-  TrendingUp,
-  Library,
   History,
-  XCircle
+  Menu,
+  X,
+  LayoutGrid,
+  List as ListIcon,
+  Search,
+  Bell,
+  ChevronRight
 } from 'lucide-react';
-
-const NotificationToast: React.FC<{ notification: Notification; onRemove: (id: string) => void }> = ({ notification, onRemove }) => {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 50, scale: 0.3 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
-      className={`flex items-center p-4 mb-4 text-sm font-bold rounded-2xl shadow-xl border ${
-        notification.type === 'success' ? 'bg-green-50 text-green-800 border-green-100 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 
-        notification.type === 'error' ? 'bg-red-50 text-red-800 border-red-100 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800' : 
-        'bg-blue-50 text-blue-800 border-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800'
-      }`}
-    >
-      <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center mr-3">
-        {notification.type === 'success' ? (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-        ) : notification.type === 'error' ? (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-        ) : (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        )}
-      </div>
-      <div className="flex-1 mr-4">{notification.message}</div>
-      <button onClick={() => onRemove(notification.id)} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-      </button>
-    </motion.div>
-  );
-};
 
 const App: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [previewVideo, setPreviewVideo] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'downloader' | 'playlists' | 'ads' | 'media' | 'history' | 'settings'>('downloader');
   const [darkMode, setDarkMode] = useState(localStorage.getItem('theme') === 'dark');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
-  const { 
-    tasks, 
-    clearCompleted, 
-    notifications, 
-    removeNotification, 
-    addNotification, 
-    connectWebSocket, 
-    addTask, 
-    pollTaskStatus, 
-    fetchHistory,
-    cancelAllTasks
-  } = useTaskStore();
-  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken, providerStatus, fetchProviderStatus } = useAuthStore();
-
-  const handleCancelAll = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Empêcher la redirection vers l'onglet downloader
-    if (window.confirm("Voulez-vous vraiment annuler toutes les tâches en cours ?")) {
-      await cancelAllTasks();
-    }
-  };
-
-  useEffect(() => {
-    const initFS = async () => {
-      const { LocalFileSystemService } = await import('./services/localFileSystem');
-      const success = await LocalFileSystemService.initialize();
-      if (success) {
-        useTaskStore.getState().setLocalDirectorySelected(true);
-      }
-    };
-    initFS();
-  }, []);
-
-  const handleQuickDownload = async (url: string) => {
-    try {
-      const response = await axios.post('/api/download/', { url });
-      const data = response.data;
-      if (data.type === 'playlist') {
-        data.tasks.forEach((t: any) => {
-          addTask({ id: t.task_id, status: 'PENDING', progress: 0, original_url: url, provider: data.provider || 'URL' });
-          pollTaskStatus(t.task_id);
-        });
-        addNotification('success', `${data.tasks.length} titres ajoutés`);
-        fetchHistory();
-      } else {
-        addTask({ id: data.task_id, status: 'PENDING', progress: 0, original_url: url, provider: data.provider || 'URL' });
-        pollTaskStatus(data.task_id);
-        addNotification('info', 'Téléchargement lancé');
-        fetchHistory();
-      }
-    } catch (error) {
-      addNotification('error', 'Erreur de téléchargement');
-    }
-  };
+  const { tasks, connectWebSocket, fetchHistory, stagedTracks } = useTaskStore();
+  const { isAuthenticated, isInitialized, user, logout, initialize, accessToken } = useAuthStore();
 
   useEffect(() => {
     initialize();
@@ -135,29 +56,8 @@ const App: React.FC = () => {
     if (isAuthenticated && accessToken) {
       connectWebSocket(accessToken);
       fetchHistory();
-      
-      const urlParams = new URLSearchParams(window.location.search);
-      const authSuccess = urlParams.get('auth_success');
-      const authError = urlParams.get('auth_error');
-      const reason = urlParams.get('reason');
-
-      if (authSuccess) {
-        addNotification('success', `Compte ${authSuccess} connecté avec succès !`);
-        fetchProviderStatus();
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (authError) {
-        let message = `Erreur lors de la connexion ${authError}`;
-        if (reason === 'access_denied') message = "Connexion refusée par l'utilisateur.";
-        else if (reason === 'invalid_scope') message = "Permissions (scopes) invalides ou non autorisées.";
-        else if (reason === 'invalid_request') message = "Requête invalide (vérifiez votre Redirect URI).";
-        else if (reason === 'missing_parameters') message = "Paramètres de connexion manquants.";
-        else if (reason) message = `Erreur : ${reason}`;
-        
-        addNotification('error', message);
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
     }
-  }, [isAuthenticated, accessToken, connectWebSocket, fetchProviderStatus, addNotification]);
+  }, [isAuthenticated, accessToken, connectWebSocket, fetchHistory]);
 
   useEffect(() => {
     if (darkMode) {
@@ -169,419 +69,278 @@ const App: React.FC = () => {
     }
   }, [darkMode]);
 
-  const toggleLanguage = () => {
-    i18n.changeLanguage(i18n.language === 'fr' ? 'en' : 'fr');
-  };
-
   if (!isInitialized) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen bg-mnlv-slate-50 dark:bg-mnlv-slate-950 flex items-center justify-center">
+        <motion.div 
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+          className="w-10 h-10 border-[3px] border-mnlv-blue border-t-transparent rounded-full"
+        />
       </div>
     );
   }
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex items-center justify-center p-4">
-        {authMode === 'login' ? (
-          <Login onSwitchToRegister={() => setAuthMode('register')} />
-        ) : (
-          <Register 
-            onSwitchToLogin={() => setAuthMode('login')} 
-            onSuccess={() => setAuthMode('login')} 
-          />
-        )}
+      <div className="min-h-screen bg-mnlv-slate-50 dark:bg-mnlv-slate-950 flex items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
+          {authMode === 'login' ? (
+            <Login onSwitchToRegister={() => setAuthMode('register')} />
+          ) : (
+            <Register onSwitchToLogin={() => setAuthMode('login')} onSuccess={() => setAuthMode('login')} />
+          )}
+        </motion.div>
       </div>
     );
   }
 
-  const activeTasksCount = Object.values(tasks).filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length;
-
-  const handleTaskCounterClick = () => {
-    setActiveTab('downloader');
-    // On pourrait ajouter un filtre ou scroller vers les tâches actives si nécessaire
-  };
-
   const NavItem = ({ id, icon, label }: { id: any, icon: any, label: string }) => {
     const Icon = icon;
+    const active = activeTab === id;
     return (
       <button
-        onClick={() => setActiveTab(id as any)}
-        className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-sm transition-all duration-300 ${
-          activeTab === id 
-            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/30 translate-x-1' 
-            : 'text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-slate-800'
+        onClick={() => {
+          setActiveTab(id);
+          setIsSidebarOpen(false);
+        }}
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all duration-300 group ${
+          active 
+            ? 'bg-white dark:bg-mnlv-slate-800 shadow-pro border border-mnlv-slate-100 dark:border-mnlv-slate-700 text-mnlv-blue' 
+            : 'text-mnlv-slate-500 hover:text-mnlv-slate-900 dark:hover:text-white'
         }`}
       >
-        <Icon size={20} strokeWidth={2.5} />
-        <span className="tracking-tight">{label}</span>
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-xl transition-colors ${active ? 'bg-mnlv-blue/10' : 'bg-transparent group-hover:bg-mnlv-slate-100 dark:group-hover:bg-mnlv-slate-800'}`}>
+            <Icon size={18} strokeWidth={active ? 2.5 : 2} />
+          </div>
+          <span className={`text-sm font-bold tracking-tight ${active ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'}`}>{label}</span>
+        </div>
+        {active && (
+          <motion.div layoutId="active-pill" className="w-1.5 h-1.5 rounded-full bg-mnlv-blue" />
+        )}
       </button>
     );
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-950 flex transition-colors duration-300">
-      {/* Toast Notifications */}
-      <Toaster 
-        position="bottom-right"
-        toastOptions={{
-          duration: 4000,
-          style: {
-            borderRadius: '1rem',
-            background: '#1e293b',
-            color: '#fff',
-            fontWeight: 'bold',
-          },
-        }}
-      />
+    <div className="min-h-screen bg-mnlv-slate-50 dark:bg-mnlv-slate-950 font-sans text-mnlv-slate-900 dark:text-mnlv-slate-50 flex overflow-hidden">
+      <Toaster position="top-center" />
 
       {/* Sidebar */}
-      <aside className="w-72 bg-white dark:bg-slate-900 border-r border-gray-100 dark:border-slate-800 flex flex-col fixed h-full z-20">
-        <div className="p-8">
-          <div className="flex items-center space-x-3 mb-10">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-xl shadow-blue-500/20">
-              <Music2 className="text-white" size={24} />
+      <aside className={`
+        fixed inset-y-0 left-0 w-72 bg-mnlv-slate-50/50 dark:bg-mnlv-slate-950/50 backdrop-blur-xl border-r border-mnlv-slate-200/50 dark:border-mnlv-slate-800/50
+        transform transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] z-50 lg:relative lg:translate-x-0
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="h-full flex flex-col p-6">
+          <div className="flex items-center gap-3 mb-10 px-2">
+            <div className="w-10 h-10 bg-mnlv-blue rounded-2xl flex items-center justify-center shadow-pro-blue">
+              <Music2 className="text-white" size={22} />
             </div>
-            <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter">MNLV</h1>
+            <span className="font-display font-black text-2xl tracking-tighter">MNLV</span>
           </div>
 
-          <nav className="space-y-2">
+          <nav className="flex-1 space-y-2">
             <NavItem id="dashboard" icon={LayoutDashboard} label={t('dashboard')} />
             <NavItem id="downloader" icon={Download} label={t('downloader')} />
             <NavItem id="playlists" icon={ListMusic} label={t('playlists')} />
-            {providerStatus.spotify && <NavItem id="ads" icon={Megaphone} label="Spotify Ads" />}
-            <NavItem id="media" icon={Wrench} label={t('mediaTools')} />
+            <NavItem id="media" icon={Wrench} label={t('media_tools')} />
             <NavItem id="history" icon={History} label={t('history')} />
-            <NavItem id="settings" icon={Settings} label={t('settings')} />
           </nav>
-        </div>
 
-        <div className="mt-auto p-6 space-y-4">
-          <div className="bg-gray-50 dark:bg-slate-800/50 p-4 rounded-3xl border border-gray-100 dark:border-slate-800">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-black">
-                {user?.username?.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-black text-gray-900 dark:text-white truncate">{user?.username}</p>
-                <p className="text-[10px] text-gray-400 font-bold uppercase truncate tracking-wider">{user?.email}</p>
-              </div>
+          <div className="mt-auto pt-6 space-y-6">
+            <div className="px-2">
+              <NavItem id="settings" icon={Settings} label={t('settings')} />
             </div>
-            <button 
-              onClick={logout}
-              className="w-full flex items-center justify-center space-x-2 py-2 text-xs font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-            >
-              <LogOut size={14} />
-              <span>{t('logout')}</span>
-            </button>
-          </div>
 
-          <div className="flex items-center justify-between px-2">
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
-            >
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <button 
-              onClick={toggleLanguage}
-              className="p-2 text-gray-400 hover:text-blue-500 transition-colors flex items-center space-x-1"
-            >
-              <Globe size={20} />
-              <span className="text-[10px] font-black uppercase">{i18n.language}</span>
-            </button>
+            <div className="p-5 bg-white dark:bg-mnlv-slate-900 rounded-[2rem] border border-mnlv-slate-100 dark:border-mnlv-slate-800 shadow-pro">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-mnlv-red flex items-center justify-center text-white font-bold shadow-lg shadow-mnlv-red/20">
+                  {user?.username?.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black truncate">{user?.username}</p>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <p className="text-[10px] text-mnlv-slate-500 font-bold uppercase tracking-widest">Premium</p>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={logout}
+                className="w-full flex items-center justify-center gap-2 py-3 text-xs font-black text-mnlv-red hover:bg-mnlv-red/5 rounded-xl transition-all active:scale-95"
+              >
+                <LogOut size={14} />
+                <span>Déconnexion</span>
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between px-4 pb-2">
+              <button onClick={() => setDarkMode(!darkMode)} className="p-2.5 bg-white dark:bg-mnlv-slate-900 rounded-xl border border-mnlv-slate-100 dark:border-mnlv-slate-800 shadow-sm text-mnlv-slate-500 hover:text-mnlv-blue transition-all active:scale-90">
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <button onClick={() => i18n.changeLanguage(i18n.language === 'fr' ? 'en' : 'fr')} className="p-2.5 bg-white dark:bg-mnlv-slate-900 rounded-xl border border-mnlv-slate-100 dark:border-mnlv-slate-800 shadow-sm text-mnlv-slate-500 hover:text-mnlv-blue transition-all active:scale-90">
+                <Globe size={18} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 ml-72 min-h-screen">
-        <header className="h-20 border-b border-gray-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between px-10">
-          <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
-            {t(activeTab)}
-          </h2>
-          
-          {activeTasksCount > 0 && (
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={handleTaskCounterClick}
-                className="flex items-center space-x-2 bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-2xl border border-blue-100 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-95"
-              >
-                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                <span className="text-xs font-black text-blue-600 dark:text-blue-400">
-                  {activeTasksCount} {t('active_tasks')}
-                </span>
-              </button>
-              
-              <button
-                onClick={handleCancelAll}
-                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
-                title="Tout annuler"
-              >
-                <XCircle size={18} />
-              </button>
+      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {/* Top Header */}
+        <header className="h-20 flex items-center justify-between px-6 lg:px-10 border-b border-mnlv-slate-200/50 dark:border-mnlv-slate-800/50 bg-white/50 dark:bg-mnlv-slate-950/50 backdrop-blur-xl z-30">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden p-2 text-mnlv-slate-600 dark:text-mnlv-slate-400 hover:bg-mnlv-slate-100 dark:hover:bg-mnlv-slate-800 rounded-xl transition-colors"
+            >
+              <Menu size={22} />
+            </button>
+            <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-mnlv-slate-100 dark:bg-mnlv-slate-900 rounded-xl border border-mnlv-slate-200/50 dark:border-mnlv-slate-800/50 text-mnlv-slate-400 focus-within:text-mnlv-blue focus-within:border-mnlv-blue/30 transition-all w-64 lg:w-96">
+              <Search size={16} />
+              <input type="text" placeholder="Rechercher..." className="bg-transparent border-none outline-none text-xs font-bold w-full placeholder:text-mnlv-slate-500" />
             </div>
-          )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button className="p-2.5 text-mnlv-slate-500 hover:text-mnlv-blue transition-colors relative">
+              <Bell size={20} />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-mnlv-red rounded-full border-2 border-white dark:border-mnlv-slate-950" />
+            </button>
+            <div className="h-8 w-px bg-mnlv-slate-200 dark:bg-mnlv-slate-800 mx-2" />
+            <div className="flex items-center gap-3 pl-2">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-black leading-none mb-1">{user?.username}</p>
+                <p className="text-[9px] text-mnlv-blue font-bold uppercase tracking-widest">Compte Pro</p>
+              </div>
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-mnlv-blue to-indigo-600 shadow-pro-blue p-0.5">
+                <div className="w-full h-full rounded-[14px] bg-white dark:bg-mnlv-slate-950 flex items-center justify-center font-black text-mnlv-blue text-sm">
+                  {user?.username?.charAt(0).toUpperCase()}
+                </div>
+              </div>
+            </div>
+          </div>
         </header>
 
-        <div className="p-10 max-w-6xl mx-auto">
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto p-6 lg:p-10 space-y-10 custom-scrollbar">
           <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {activeTab === 'dashboard' && (
-                <div className="space-y-10">
-                  {/* Stats / Welcome Header */}
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="grid grid-cols-1 md:grid-cols-3 gap-6"
-                  >
-                    <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2.5rem] text-white shadow-2xl shadow-blue-500/20 col-span-1 md:col-span-2 relative overflow-hidden group">
-                      <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-3xl group-hover:bg-white/20 transition-all duration-700" />
-                      <div className="relative z-10">
-                        <h3 className="text-3xl font-black tracking-tighter mb-2">Hello, {user?.username}! 👋</h3>
-                        <p className="text-blue-100 font-bold text-sm max-w-sm opacity-80 leading-relaxed">
-                          Votre studio de téléchargement personnel est prêt. Collez un lien pour commencer.
-                        </p>
-                        <button 
-                          onClick={() => setActiveTab('downloader')}
-                          className="mt-6 px-8 py-3 bg-white text-blue-600 rounded-2xl font-black text-sm hover:shadow-xl hover:scale-105 transition-all active:scale-95"
-                        >
-                          Lancer un téléchargement
-                        </button>
-                      </div>
+            {activeTab === 'downloader' && (
+              <motion.div
+                key="downloader"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                className="max-w-6xl mx-auto space-y-10"
+              >
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                    <h2 className="text-4xl font-display font-black tracking-tight">{t('downloader')}</h2>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="px-2 py-0.5 bg-mnlv-blue/10 text-mnlv-blue text-[10px] font-black uppercase tracking-widest rounded-md">High Speed</span>
+                      <p className="text-mnlv-slate-500 text-sm font-medium">Téléchargez vos médias en un clic.</p>
                     </div>
-                    
-                    <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm flex flex-col justify-center items-center text-center group">
-                      <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center text-blue-600 mb-4 group-hover:scale-110 transition-transform">
-                        <Download size={28} strokeWidth={2.5} />
-                      </div>
-                      <p className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter">{Object.values(tasks).length}</p>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Titres traités</p>
-                    </div>
-                  </motion.div>
-
-                  {/* Deezer Features Section */}
-                  {providerStatus.deezer && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="grid grid-cols-1 md:grid-cols-4 gap-6"
+                  </div>
+                  
+                  <div className="flex items-center gap-2 bg-white dark:bg-mnlv-slate-900 p-1.5 rounded-2xl border border-mnlv-slate-200/50 dark:border-mnlv-slate-800/50 shadow-sm">
+                    <button 
+                      onClick={() => setViewMode('list')}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${viewMode === 'list' ? 'bg-mnlv-blue text-white shadow-pro-blue' : 'text-mnlv-slate-400 hover:bg-mnlv-slate-50 dark:hover:bg-mnlv-slate-800'}`}
                     >
-                      <div className="md:col-span-4 flex items-center gap-3">
-                        <div className="w-1 h-6 bg-purple-600 rounded-full" />
-                        <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">
-                          Fonctionnalités Deezer
-                        </h3>
-                      </div>
-                      
-                      <button 
-                        onClick={() => axios.get('/api/auth/providers/deezer/flow/').then(res => {
-                          res.data.tasks.forEach((t: any) => {
-                            addTask({ id: t.task_id, status: 'PENDING', progress: 0, original_url: 'Flow Deezer', provider: 'deezer' });
-                            pollTaskStatus(t.task_id);
-                          });
-                          addNotification('success', 'Flow Deezer lancé');
-                        })}
-                        className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-purple-200 transition-all flex flex-col items-center text-center gap-3 group"
-                      >
-                        <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/20 rounded-2xl flex items-center justify-center text-purple-600 group-hover:scale-110 transition-transform">
-                          <Radio size={24} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-black text-gray-900 dark:text-white uppercase">Mon Flow</p>
-                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Radio Personnelle</p>
-                        </div>
-                      </button>
+                      <ListIcon size={16} />
+                      <span>Liste</span>
+                    </button>
+                    <button 
+                      onClick={() => setViewMode('grid')}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${viewMode === 'grid' ? 'bg-mnlv-blue text-white shadow-pro-blue' : 'text-mnlv-slate-400 hover:bg-mnlv-slate-50 dark:hover:bg-mnlv-slate-800'}`}
+                    >
+                      <LayoutGrid size={16} />
+                      <span>Grille</span>
+                    </button>
+                  </div>
+                </div>
 
-                      <button 
-                        onClick={() => setActiveTab('playlists')}
-                        className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-xl hover:border-pink-200 transition-all flex flex-col items-center text-center gap-3 group"
-                      >
-                        <div className="w-12 h-12 bg-pink-50 dark:bg-pink-900/20 rounded-2xl flex items-center justify-center text-pink-600 group-hover:scale-110 transition-transform">
-                          <Library size={24} />
-                        </div>
-                        <div>
-                          <p className="text-xs font-black text-gray-900 dark:text-white uppercase">Mes Favoris</p>
-                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Coups de Cœur</p>
-                        </div>
-                      </button>
+                <div className="relative group">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-mnlv-blue to-indigo-600 rounded-[2rem] blur opacity-20 group-hover:opacity-30 transition duration-1000 group-hover:duration-200" />
+                  <URLInput />
+                </div>
 
-                      <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm">
-                         <div className="flex items-center gap-3 mb-4">
-                            <TrendingUp size={18} className="text-blue-500" />
-                            <p className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-widest">Tendances</p>
-                         </div>
-                         <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleQuickDownload('https://www.deezer.com/playlist/3155776842')}
-                              className="flex-1 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-tighter hover:bg-blue-600 hover:text-white transition-all"
-                            >
-                              Top 50 Monde
-                            </button>
-                            <button 
-                              onClick={() => handleQuickDownload('https://www.deezer.com/playlist/1109890291')}
-                              className="flex-1 py-2 bg-gray-50 dark:bg-slate-800 text-gray-400 rounded-xl text-[10px] font-black uppercase tracking-tighter hover:bg-gray-200 dark:hover:bg-slate-700 transition-all"
-                            >
-                              Top France
-                            </button>
-                         </div>
-                      </div>
-                    </motion.div>
-                  )}
+                {/* CSV/Excel Upload Section */}
+                <div className="pt-4">
+                  <CSVUpload />
+                </div>
 
-                  <section>
-                    <div className="flex justify-between items-center mb-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-1 h-6 bg-blue-600 rounded-full" />
-                        <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">
-                          {t('recent_history')}
-                        </h3>
-                      </div>
-                      {Object.values(tasks).length > 0 && (
-                        <button 
-                          onClick={clearCompleted}
-                          className="px-4 py-2 bg-gray-50 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20 text-[10px] font-black text-gray-400 hover:text-red-500 uppercase tracking-widest rounded-xl transition-all"
-                        >
-                          {t('clear_list')}
-                        </button>
-                      )}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between px-2">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-black text-xl tracking-tight">File d'attente</h3>
+                      <span className="w-6 h-6 rounded-lg bg-mnlv-slate-200 dark:bg-mnlv-slate-800 flex items-center justify-center text-[10px] font-black text-mnlv-slate-500">
+                        {Object.keys(tasks).length + stagedTracks.length}
+                      </span>
                     </div>
-                    
-                    {Object.values(tasks).length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  </div>
+
+                  {stagedTracks.length > 0 && <StagingArea />}
+
+                  {Object.keys(tasks).length > 0 && (
+                    viewMode === 'grid' ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         <AnimatePresence mode="popLayout">
                           {Object.values(tasks).map(task => (
-                            <DownloadCard key={task.id} task={task} onPreviewVideo={setPreviewVideo} />
+                            <DownloadCard key={task.id} task={task} />
                           ))}
                         </AnimatePresence>
                       </div>
                     ) : (
-                      <div className="text-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm border-dashed">
-                        <div className="bg-blue-50 dark:bg-blue-900/20 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 transform rotate-3">
-                          <Music2 className="text-blue-500 dark:text-blue-400" size={40} />
-                        </div>
-                        <h4 className="text-xl font-black text-gray-900 dark:text-white mb-2">{t('ready_for_music')}</h4>
-                        <p className="text-gray-400 dark:text-gray-500 max-w-xs mx-auto text-sm font-medium leading-relaxed mb-8">
-                          {t('paste_link')}
-                        </p>
-                        <div className="flex justify-center gap-3 opacity-30 grayscale">
-                          <Disc size={20} /> <Radio size={20} /> <Cloud size={20} /> <Youtube size={20} />
-                        </div>
+                      <TaskList tasks={Object.values(tasks)} />
+                    )
+                  )}
+
+                  {Object.keys(tasks).length === 0 && stagedTracks.length === 0 && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-24 text-center">
+                      <div className="w-20 h-20 bg-mnlv-slate-100 dark:bg-mnlv-slate-900 rounded-[2.5rem] flex items-center justify-center mx-auto text-mnlv-slate-300 mb-6 border border-mnlv-slate-200/50 dark:border-mnlv-slate-800/50">
+                        <Download size={32} />
                       </div>
-                    )}
-                  </section>
+                      <h4 className="text-lg font-black mb-1">Prêt à télécharger</h4>
+                      <p className="text-mnlv-slate-500 text-sm font-medium">Vos téléchargements apparaîtront ici en temps réel.</p>
+                    </motion.div>
+                  )}
                 </div>
-              )}
+              </motion.div>
+            )}
 
-              {activeTab === 'downloader' && (
-                <div className="space-y-8">
-                  <URLInput />
-                  <div className="grid grid-cols-1 gap-8">
-                    <CSVUpload />
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'playlists' && <PlaylistExplorer />}
-              {activeTab === 'ads' && <AdsDashboard />}
-              {activeTab === 'media' && <MediaTools />}
-
-              {activeTab === 'history' && (
-                <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
-                  <HistoryView />
-                </div>
-              )}
-
-              {activeTab === 'settings' && (
-                <div className="space-y-8">
-                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
-                    <h3 className="text-xl font-black text-gray-900 dark:text-white tracking-tight mb-6">Préférences</h3>
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
-                        <div>
-                          <p className="font-black text-gray-900 dark:text-white">{t('dark_mode')}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Activer ou désactiver l'interface sombre</p>
-                        </div>
-                        <button 
-                          onClick={() => setDarkMode(!darkMode)}
-                          className={`w-14 h-8 rounded-full transition-all relative ${darkMode ? 'bg-blue-600' : 'bg-gray-300'}`}
-                        >
-                          <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${darkMode ? 'left-7' : 'left-1'}`} />
-                        </button>
+            {activeTab === 'dashboard' && (
+              <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="max-w-6xl mx-auto space-y-10">
+                <h2 className="text-4xl font-display font-black tracking-tight">Vue d'ensemble</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {[
+                    { label: 'Téléchargements', val: '1,284', trend: '+12%', color: 'text-mnlv-blue' },
+                    { label: 'Espace Économisé', val: '42.5 GB', trend: '+5%', color: 'text-mnlv-red' },
+                    { label: 'Playlists Sync', val: '28', trend: '+2', color: 'text-indigo-500' }
+                  ].map((stat, i) => (
+                    <div key={i} className="p-8 bg-white dark:bg-mnlv-slate-900 rounded-[2.5rem] border border-mnlv-slate-100 dark:border-mnlv-slate-800 shadow-pro group hover:shadow-pro-hover transition-all duration-500">
+                      <div className="flex justify-between items-start mb-4">
+                        <p className="text-mnlv-slate-500 font-black text-[10px] uppercase tracking-widest">{stat.label}</p>
+                        <span className="text-[10px] font-black text-green-500 px-2 py-1 bg-green-500/10 rounded-lg">{stat.trend}</span>
                       </div>
-
-                      <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-slate-800/50 rounded-3xl">
-                        <div>
-                          <p className="font-black text-gray-900 dark:text-white">{t('language')}</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Changer la langue de l'interface</p>
-                        </div>
-                        <button 
-                          onClick={toggleLanguage}
-                          className="px-6 py-2 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-xl font-black text-sm uppercase shadow-sm"
-                        >
-                          {i18n.language === 'fr' ? 'English' : 'Français'}
-                        </button>
-                      </div>
+                      <p className={`text-4xl font-display font-black ${stat.color}`}>{stat.val}</p>
                     </div>
-                  </div>
-
-                  <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-gray-100 dark:border-slate-800">
-                    <ProviderManager />
-                  </div>
+                  ))}
                 </div>
-              )}
-            </motion.div>
+              </motion.div>
+            )}
+
+            {activeTab === 'playlists' && <PlaylistExplorer key="playlists" />}
+            {activeTab === 'media' && <MediaTools key="media" />}
+            {activeTab === 'history' && <HistoryView key="history" />}
+            {activeTab === 'settings' && <ProviderManager key="settings" />}
           </AnimatePresence>
         </div>
       </main>
-
-      {/* Notifications */}
-      <div className="fixed bottom-10 right-10 z-50 flex flex-col items-end pointer-events-none">
-        <div className="pointer-events-auto w-full max-w-sm">
-          <AnimatePresence>
-            {notifications.map(n => (
-              <NotificationToast key={n.id} notification={n} onRemove={removeNotification} />
-            ))}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Video Preview Modal */}
-      <AnimatePresence>
-        {previewVideo && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setPreviewVideo(null)}
-              className="absolute inset-0 bg-black/95 backdrop-blur-md"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-5xl bg-black rounded-[3rem] overflow-hidden shadow-2xl border border-white/10"
-            >
-              <button 
-                onClick={() => setPreviewVideo(null)}
-                className="absolute top-6 right-6 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-              >
-                <LogOut size={24} className="rotate-90" />
-              </button>
-              <video 
-                src={previewVideo} 
-                controls 
-                autoPlay 
-                className="w-full aspect-video"
-              />
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

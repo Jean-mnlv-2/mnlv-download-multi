@@ -66,6 +66,19 @@ services:
       redis:
         condition: service_healthy
 
+  worker_media:
+    build: ./mnlv_backend
+    command: celery -A core worker -Q media_processing -c 2 --loglevel=info
+    volumes:
+      - ./mnlv_backend:/app
+      - media_volume:/app/media
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   beat:
     build: ./mnlv_backend
     command: celery -A core beat --loglevel=info

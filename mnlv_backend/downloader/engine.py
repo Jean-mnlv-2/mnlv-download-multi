@@ -9,10 +9,10 @@ from pathlib import Path
 from django.conf import settings
 from .models import DownloadTask, TrackMetadata
 from .providers.factory import ProviderFactory
+from .providers.base import ProviderTrackMetadata, ProviderError, ProviderAuthError, ProviderRateLimitError, ProviderResourceNotFoundError, ProviderAPIError
 from .matching.matcher import ISRCMatcher
 from media_tools.services import MediaService
 from core.logger_utils import get_mnlv_logger
-from .providers.base import ProviderTrackMetadata
 from .realtime import default_notifier
 
 class DownloadEngine:
@@ -146,6 +146,7 @@ class DownloadEngine:
             self._set_progress(5)
             
             auth_token = None
+            refresh_token = None
             if self.task.user:
                 from api.models import ProviderAuth
                 if "spotify.com" in self.task.original_url:
@@ -164,11 +165,29 @@ class DownloadEngine:
                 if p_name:
                     auth_obj = ProviderAuth.objects.filter(user=self.task.user, provider=p_name).first()
                     if auth_obj:
+                        from django.utils import timezone
+                        from datetime import timedelta
+                        if auth_obj.expires_at and auth_obj.expires_at <= timezone.now() + timedelta(minutes=1):
+                            self.logger.info(f"Token {p_name} expiré pour le moteur, rafraîchissement...")
+                            try:
+                                from api.tasks import refresh_spotify_token, refresh_deezer_token, refresh_tidal_token
+                                if p_name == 'spotify':
+                                    refresh_spotify_token(auth_obj)
+                                elif p_name == 'deezer':
+                                    refresh_deezer_token(auth_obj)
+                                elif p_name == 'tidal':
+                                    refresh_tidal_token(auth_obj)
+                                auth_obj.refresh_from_db()
+                            except Exception as e:
+                                self.logger.error(f"Échec du refresh automatique dans le moteur: {e}")
+                        
                         auth_token = auth_obj.access_token
+                        refresh_token = auth_obj.refresh_token
+                        user_id = auth_obj.provider_user_id
 
             metadata = self._load_metadata_from_db_if_present()
             if metadata is None:
-                provider = ProviderFactory.get_provider(self.task.original_url, auth_token=auth_token)
+                provider = ProviderFactory.get_provider(self.task.original_url, auth_token=auth_token, refresh_token=refresh_token, user_id=user_id)
                 metadata = provider.get_track_info_cached(self.task.original_url)
             
             track_meta = None
@@ -333,6 +352,31 @@ class DownloadEngine:
             self.task.progress = 100
             self._notify("Téléchargement prêt !", force=True)
 
+        except ProviderError as e:
+            # Erreurs spécifiques aux providers (Spotify, Tidal, etc.)
+            err = str(e)
+            code = e.code or "PROVIDER_ERROR"
+            
+            # Message plus convivial pour l'utilisateur
+            friendly_msg = err
+            if isinstance(e, ProviderAuthError):
+                friendly_msg = f"Erreur d'authentification {self.task.provider} : Veuillez reconnecter votre compte."
+            elif isinstance(e, ProviderRateLimitError):
+                friendly_msg = f"Le service {self.task.provider} limite temporairement les requêtes. Réessayez plus tard."
+            elif isinstance(e, ProviderResourceNotFoundError):
+                friendly_msg = "Le contenu demandé est introuvable sur la plateforme source."
+
+            DownloadTask.objects.filter(id=self.task.id).update(
+                status=DownloadTask.Status.FAILED,
+                error_message=friendly_msg,
+                error_code=code,
+            )
+            self.task.status = DownloadTask.Status.FAILED
+            self.task.error_message = friendly_msg
+            self.task.error_code = code
+            self._notify(friendly_msg, force=True)
+            raise
+
         except Exception as e:
             # classification simple et actionnable
             err = str(e)
@@ -343,8 +387,6 @@ class DownloadEngine:
                 code = "FFMPEG"
             elif "YouTube" in err or "yt-dlp" in err or "Erreur YouTube" in err:
                 code = "YTDLP"
-            elif "Token" in err or "auth" in err.lower() or "401" in err:
-                code = "PROVIDER_AUTH"
             elif "Aucun flux compatible" in err or "matching" in err.lower():
                 code = "NO_MATCH"
 

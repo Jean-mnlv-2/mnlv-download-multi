@@ -44,11 +44,10 @@ class ProviderFactory:
                 logger.exception("Erreur chargement provider depuis %s", provider_path)
 
     @staticmethod
-    def get_provider(url: str, auth_token: Optional[str] = None) -> MusicProvider:
+    def get_provider(url: str, auth_token: Optional[str] = None, refresh_token: Optional[str] = None, user_id: Optional[str] = None) -> MusicProvider:
         """
         Analyse l'URL et retourne une instance du provider correspondant.
-        auth_token peut être passé pour les opérations d'écriture (playlists).
-        Optimisé pour réutiliser les instances si nécessaire.
+        auth_token, refresh_token et user_id peuvent être passés pour les opérations d'écriture.
         """
         if not ProviderFactory._providers:
             ProviderFactory.initialize()
@@ -57,7 +56,14 @@ class ProviderFactory:
 
         for ProviderClass in ProviderFactory._providers:
             try:
-                provider = ProviderClass(auth_token=auth_token)
+                try:
+                    provider = ProviderClass(auth_token=auth_token, refresh_token=refresh_token, user_id=user_id)
+                except TypeError:
+                    try:
+                        provider = ProviderClass(auth_token=auth_token, refresh_token=refresh_token)
+                    except TypeError:
+                        provider = ProviderClass(auth_token=auth_token)
+                
                 if provider.supports_url(url):
                     logger.info(f"Provider détecté : {ProviderClass.__name__} pour l'URL : {url[:30]}...")
                     return provider

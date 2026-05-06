@@ -35,9 +35,15 @@ class StandardizedErrorMixin:
             return super().handle_exception(exc)
             
         exc_str = str(exc).lower()
-        if "expired" in exc_str or "401" in exc_str or "unauthorized" in exc_str:
+        auth_error_keywords = [
+            "expired", "401", "unauthorized", 
+            "expiré", "authentifiée", "reconnecter", "connexion requise",
+            "token requis", "authentification échouée"
+        ]
+        
+        if any(kw in exc_str for kw in auth_error_keywords):
             return self.error_response(
-                message="Votre session avec le service de musique a expiré. Veuillez vous reconnecter.",
+                message="Votre session avec le service de musique a expiré ou nécessite une reconnexion. Veuillez reconnecter votre compte.",
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 error_code="AUTH_EXPIRED"
             )

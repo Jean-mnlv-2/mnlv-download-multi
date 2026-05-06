@@ -1,6 +1,5 @@
 import os
 import shutil
-import time
 from datetime import timedelta
 from pathlib import Path
 from django.utils import timezone
@@ -16,13 +15,13 @@ logger = get_task_logger(__name__)
     bind=True,
     max_retries=3,
     default_retry_delay=60,
-    queue='high_priority',
+    queue='media_processing',
     rate_limit=os.getenv("DOWNLOAD_RATE_LIMIT_HIGH", None) or None,
 )
 def process_single_track(self, task_id: str):
     """
     Tâche Celery pour traiter un téléchargement unique.
-    Utilise une queue prioritaire.
+    Utilise la queue 'media_processing' pour limiter la concurrence CPU (FFmpeg).
     """
     try:
         engine = DownloadEngine(task_id, logger=logger)
@@ -34,13 +33,13 @@ def process_single_track(self, task_id: str):
 @shared_task(
     bind=True,
     max_retries=2,
-    queue='low_priority',
+    queue='media_processing',
     rate_limit=os.getenv("DOWNLOAD_RATE_LIMIT_LOW", None) or None,
 )
 def process_playlist_item(self, task_id: str):
     """
     Tâche Celery pour traiter un élément d'une playlist.
-    Utilise une queue de basse priorité pour ne pas bloquer les requêtes uniques.
+    Utilise aussi la queue 'media_processing' pour le contrôle de concurrence.
     """
     try:
         engine = DownloadEngine(task_id, logger=logger)

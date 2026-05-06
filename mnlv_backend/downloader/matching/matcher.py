@@ -1,11 +1,13 @@
 from typing import Optional
 import yt_dlp
+from django.core.cache import cache
 from ..providers.base import ProviderTrackMetadata
 
 class ISRCMatcher:
     """
     Module de matching intelligent Spotify -> YouTube Music.
     Priorise le code ISRC pour une précision de 100%.
+    Inclut un système de cache pour réduire les appels yt-dlp.
     """
     
     def __init__(self, logger=None):
@@ -14,15 +16,23 @@ class ISRCMatcher:
     def find_best_match(self, metadata: ProviderTrackMetadata) -> str:
         """
         Trouve l'URL YouTube la plus pertinente.
-        1. Recherche par ISRC sur YouTube Music (100% précision)
-        2. Recherche par UPC/EAN (identifiants de secours)
-        3. Recherche textuelle {artist} - {title} audio
         """
+        # Système de cache par ISRC
+        if metadata.isrc:
+            cache_key = f"isrc_match:{metadata.isrc}"
+            cached_url = cache.get(cache_key)
+            if cached_url:
+                if self.logger:
+                    self.logger.info(f"Cache HIT pour ISRC {metadata.isrc} -> {cached_url}")
+                return cached_url
+
         # Stratégie 1: ISRC (La plus précise)
         if metadata.isrc:
             isrc_query = f"isrc:{metadata.isrc}"
             match = self._try_search(isrc_query, metadata, "ISRC")
-            if match: return match
+            if match:
+                cache.set(f"isrc_match:{metadata.isrc}", match, timeout=86400 * 30)
+                return match
 
         for id_type, id_val in [("UPC", metadata.upc), ("EAN", metadata.ean)]:
             if id_val:

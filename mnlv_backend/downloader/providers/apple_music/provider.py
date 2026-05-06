@@ -343,29 +343,32 @@ class AppleMusicProvider(MusicProvider):
             self._handle_api_error(e)
 
     def add_tracks_to_playlist(self, playlist_id: str, track_urls: List[str], position: Optional[int] = None) -> Optional[str]:
-        """Ajoute des titres ou des clips à une playlist de bibliothèque"""
+        """Ajoute des titres ou des clips à une playlist de bibliothèque avec découpage par lots (max 100)"""
         if not self.auth_token:
             raise ValueError("Music-User-Token requis.")
 
         url = f"{self.base_url}/me/library/playlists/{playlist_id}/tracks"
         
-        tracks_data = []
+        all_tracks_data = []
         for track_url in track_urls:
             try:
                 t_id = self._extract_id(track_url)
                 t_type = "music-videos" if "/music-video/" in track_url else "songs"
-                tracks_data.append({"id": t_id, "type": t_type})
+                all_tracks_data.append({"id": t_id, "type": t_type})
             except:
                 continue
 
-        payload = {"data": tracks_data}
-        
-        try:
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=15)
-            response.raise_for_status()
-            return "success"
-        except Exception as e:
-            self._handle_api_error(e)
+        chunk_size = 100
+        for i in range(0, len(all_tracks_data), chunk_size):
+            chunk = all_tracks_data[i:i + chunk_size]
+            payload = {"data": chunk}
+            try:
+                response = requests.post(url, headers=self._get_headers(), json=payload, timeout=15)
+                response.raise_for_status()
+            except Exception as e:
+                self._handle_api_error(e)
+                
+        return "success"
 
     def _extract_id(self, url: str) -> str:
         """Extrait l'ID de l'URL Apple Music (Song, Album, Playlist, Music Video)"""

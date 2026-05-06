@@ -27,7 +27,7 @@ interface AuthState {
   providerStatus: ProviderStatus;
   
   login: (accessToken: string, refreshToken: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   fetchProfile: () => Promise<void>;
   fetchProviderStatus: () => Promise<void>;
   initialize: () => Promise<void>;
@@ -60,16 +60,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await get().fetchProviderStatus();
   },
 
-  logout: () => {
-    localStorage.removeItem('mnlv_access_token');
-    localStorage.removeItem('mnlv_refresh_token');
-    set({ 
-      user: null, 
-      accessToken: null, 
-      refreshToken: null, 
-      isAuthenticated: false, 
-      providerStatus: initialProviderStatus 
-    });
+  logout: async () => {
+    try {
+      const token = get().accessToken;
+      if (token) {
+        await axios.post('/api/auth/logout/', {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+    } catch (error) {
+      console.error("Error during backend logout", error);
+    } finally {
+      localStorage.removeItem('mnlv_access_token');
+      localStorage.removeItem('mnlv_refresh_token');
+      set({ 
+        user: null, 
+        accessToken: null, 
+        refreshToken: null, 
+        isAuthenticated: false, 
+        providerStatus: initialProviderStatus 
+      });
+    }
   },
 
   fetchProfile: async () => {

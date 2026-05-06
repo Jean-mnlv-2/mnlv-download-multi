@@ -104,17 +104,34 @@ class BoomplayProvider(MusicProvider):
 
     def add_tracks_to_playlist(self, playlist_id: str, track_urls: List[str]):
         """
-        Ajoute des titres à une playlist Boomplay.
+        Ajoute des titres à une playlist Boomplay avec découpage par lots.
         """
         if not self.auth_token:
             raise ValueError("Token utilisateur requis pour modifier une playlist.")
             
-        track_ids = [self._extract_id(u, r"songs?") for u in track_urls]
-        payload = {
-            "playlist_id": playlist_id,
-            "track_ids": track_ids
-        }
-        self._post("playlist/v1/add_tracks", json=payload)
+        track_ids = []
+        for u in track_urls:
+            try:
+                track_ids.append(self._extract_id(u, r"songs?"))
+            except Exception:
+                continue
+                
+        if not track_ids:
+            return
+
+        # Boomplay Open API peut limiter le nombre de titres par lot
+        chunk_size = 50
+        for i in range(0, len(track_ids), chunk_size):
+            chunk = track_ids[i:i + chunk_size]
+            payload = {
+                "playlist_id": playlist_id,
+                "track_ids": chunk
+            }
+            try:
+                self._post("playlist/v1/add_tracks", json=payload)
+            except Exception as e:
+                logger.error(f"Erreur lors de l'ajout de titres Boomplay : {e}")
+                raise
 
     def _post(self, endpoint: str, json: dict = None) -> dict:
         """Helper pour les requêtes POST avec authentification Boomplay"""

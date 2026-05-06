@@ -153,7 +153,22 @@ const ProviderManager: React.FC = () => {
   };
 
   const handleDisconnect = async (providerId: string) => {
-    addNotification('info', "Fonctionnalité de déconnexion bientôt disponible");
+    if (!window.confirm(`Êtes-vous sûr de vouloir déconnecter ${providerId.replace('_', ' ')} ?`)) {
+      return;
+    }
+
+    setLoading(providerId);
+    try {
+      await axios.post('/api/auth/providers/disconnect/', {
+        provider: providerId
+      });
+      addNotification('success', `Déconnecté de ${providerId.replace('_', ' ')}`);
+      await fetchProviderStatus();
+    } catch (err: any) {
+      addNotification('error', "Échec de la déconnexion");
+    } finally {
+      setLoading(null);
+    }
   };
 
   return (
@@ -208,14 +223,7 @@ const ProviderManager: React.FC = () => {
                 </div>
 
                 <div className="flex gap-2">
-                  {isConnected ? (
-                    <button 
-                      onClick={() => handleDisconnect(provider.id)}
-                      className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
-                    >
-                      <Unplug size={18} />
-                    </button>
-                  ) : (
+                  {!isConnected && (
                     <Settings2 size={18} className="text-gray-300" />
                   )}
                 </div>
@@ -226,18 +234,21 @@ const ProviderManager: React.FC = () => {
               </p>
 
               <button
-                onClick={() => handleConnect(provider)}
+                onClick={() => isConnected ? handleDisconnect(provider.id) : handleConnect(provider)}
                 disabled={isBtnLoading}
                 className={`w-full py-3.5 rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 ${
                   isConnected
-                    ? 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 cursor-default'
+                    ? 'bg-red-50 dark:bg-red-900/10 text-red-500 border-2 border-red-100 dark:border-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/20'
                     : 'bg-white dark:bg-slate-800 text-gray-900 dark:text-white border-2 border-gray-100 dark:border-slate-700 hover:border-blue-500 hover:text-blue-500'
                 }`}
               >
                 {isBtnLoading ? (
                   <Loader2 size={18} className="animate-spin" />
                 ) : isConnected ? (
-                  <>Gérer la connexion</>
+                  <>
+                    <Unplug size={16} />
+                    Gérer la connexion (Déconnecter)
+                  </>
                 ) : (
                   <>
                     <ExternalLink size={16} />

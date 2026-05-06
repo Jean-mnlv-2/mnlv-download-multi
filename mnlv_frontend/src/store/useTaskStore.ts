@@ -58,8 +58,6 @@ interface TaskStore {
   isWebSocketConnected: boolean;
 }
 
-const STORAGE_KEY = 'mnlv_history_v2';
-
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: {},
   history: [],

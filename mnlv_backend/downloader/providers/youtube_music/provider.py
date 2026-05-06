@@ -1,6 +1,8 @@
 from ..base import MusicProvider, ProviderTrackMetadata
 import re
 import logging
+import os
+import json
 try:
     from ytmusicapi import YTMusic
 except ImportError:
@@ -26,20 +28,21 @@ class YouTubeMusicProvider(MusicProvider):
     def yt(self):
         if self._yt is None:
             if self.auth_token:
-                import json
                 try:
                     cleaned_token = self.auth_token.strip()
                     if cleaned_token.startswith('{') and cleaned_token.endswith('}'):
                         auth_headers = json.loads(cleaned_token)
                         self._yt = YTMusic(auth=auth_headers)
+                    elif os.path.exists(cleaned_token):
+                        self._yt = YTMusic(auth=cleaned_token)
+                    elif cleaned_token.startswith('AIza'):
+                        logger.warning("Clé API YouTube v3 fournie au lieu des headers YouTube Music. Utilisation anonyme.")
+                        self._yt = YTMusic()
                     else:
-                        if cleaned_token.startswith('AIza'):
-                            logger.warning("Clé API YouTube v3 fournie au lieu des headers YouTube Music. Utilisation anonyme.")
-                            self._yt = YTMusic()
-                        elif os.path.exists(cleaned_token):
+                        try:
                             self._yt = YTMusic(auth=cleaned_token)
-                        else:
-                            logger.warning(f"Token YouTube Music non reconnu : {cleaned_token[:10]}...")
+                        except Exception:
+                            logger.warning(f"Format de token YouTube Music non reconnu, utilisation anonyme.")
                             self._yt = YTMusic()
                 except Exception as e:
                     logger.error(f"Erreur d'initialisation YTMusic avec token: {e}")
@@ -69,17 +72,31 @@ class YouTubeMusicProvider(MusicProvider):
         self.yt.delete_playlist(playlist_id)
 
     def add_tracks_to_playlist(self, playlist_id: str, track_urls: List[str]):
-        """Ajoute des titres via leurs IDs de vidéo YouTube"""
+        """Ajoute des titres via leurs IDs de vidéo YouTube avec découpage par lots"""
         if not self.auth_token or self.auth_token.startswith('AIza'):
-            raise Exception("Authentification requise pour modifier une playlist.")
+            raise Exception("Authentification YouTube Music requise. Veuillez fournir vos headers JSON (cookies) et non une clé API v3 pour les opérations de bibliothèque.")
+        
         video_ids = []
         for url in track_urls:
             try:
-                video_ids.append(self._extract_id(url, "watch?v="))
+                if "watch?v=" in url:
+                    video_ids.append(url.split("watch?v=")[1].split("&")[0])
+                elif "youtu.be/" in url:
+                    video_ids.append(url.split("youtu.be/")[1].split("?")[0])
+                else:
+                    video_ids.append(url)
             except Exception:
                 continue
+        
         if video_ids:
-            self.yt.add_playlist_items(playlist_id, video_ids)
+            chunk_size = 50
+            for i in range(0, len(video_ids), chunk_size):
+                chunk = video_ids[i:i + chunk_size]
+                try:
+                    self.yt.add_playlist_items(playlist_id, chunk)
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'ajout de titres YouTube Music : {e}")
+                    raise Exception(f"Erreur YouTube Music : {str(e)}")
 
     def remove_tracks_from_playlist(self, playlist_id: str, track_urls: List[str]):
         """Retire des titres d'une playlist"""
